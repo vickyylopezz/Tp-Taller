@@ -1,3 +1,6 @@
+use bittorrent::client::Client;
+
 fn main() {
-    println!("Hello, world!");
+    let cliente = Client::new();
+    cliente.run();
 }

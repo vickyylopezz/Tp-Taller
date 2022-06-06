@@ -3,7 +3,7 @@
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParserError {
     Empty,
-    InvalidEncoding,
+    InvalidEncoding(usize, &'static str), //TODO: Remove str
     InvalidInteger(String),
     InvalidByteStringLength,
 }

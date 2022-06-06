@@ -6,13 +6,13 @@ use std::str;
 /// This type is tasked with parsing bencoded data
 pub struct Parser {
     /// Characters in the bencoded string
-    characters: Vec<char>,
+    characters: Vec<u8>,
     /// Cursor that point to the current character
     cursor: usize,
 }
 
 impl Iterator for Parser {
-    type Item = char;
+    type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.pop()
@@ -41,12 +41,13 @@ impl Parser {
     ///
     fn byte_string(&mut self) -> Result<BencodedValue, ParserError> {
         let length = self
-            .take_while(|c| c.is_alphanumeric() && *c != ':')
+            .take_while(|c| (*c as char).is_alphanumeric() && *c != b':')
+            .map(|c| c as char)
             .collect::<String>()
             .parse()
             .map_err(|_| ParserError::InvalidByteStringLength)?;
 
-        let byte_string = self.take(length).collect::<String>().as_bytes().into();
+        let byte_string = self.take(length).collect::<Vec<u8>>();
         Ok(BencodedValue::ByteString(byte_string))
     }
     /// Parses the string if it's a valid bencoded dictionary and
@@ -89,23 +90,29 @@ impl Parser {
 
         while let Some(c) = self.peek() {
             match c {
-                '1'..='9' => {
+                b'1'..=b'9' => {
                     let key = self.byte_string()?;
                     let value = self.bencoded_value()?;
                     dict.push((key, value));
                 }
-                'e' => {
+                b'e' => {
                     end_found = true;
+                    self.pop();
                     break;
                 }
-                _ => return Err(ParserError::InvalidEncoding),
+                _ => {
+                    return Err(ParserError::InvalidEncoding(
+                        self.cursor,
+                        "invalid dict element",
+                    ))
+                }
             }
         }
 
         if end_found {
             Ok(BencodedValue::Dictionary(dict))
         } else {
-            Err(ParserError::InvalidEncoding)
+            Err(ParserError::InvalidEncoding(self.cursor, "end not found"))
         }
     }
     /// Parses the string if it's a valid bencoded integer and returns
@@ -128,7 +135,11 @@ impl Parser {
     /// ```
     ///    
     fn integer(&mut self) -> Result<BencodedValue, ParserError> {
-        let bencoded_string = self.skip(1).take_while(|c| *c != 'e').collect::<String>();
+        let bencoded_string = self
+            .skip(1)
+            .take_while(|c| *c != 101)
+            .map(|c| c as char)
+            .collect::<String>();
         if check_zero(&bencoded_string) {
             return Err(ParserError::InvalidInteger(bencoded_string));
         }
@@ -162,21 +173,26 @@ impl Parser {
     fn list(&mut self) -> Result<BencodedValue, ParserError> {
         let mut vec = Vec::new();
         self.pop();
+        let end_found;
         loop {
-            if self.take_if('e') == Some('e') {
+            if self.take_if(b'e') == Some(b'e') {
+                end_found = true;
                 break;
             }
             vec.push(self.bencoded_value()?);
         }
-
-        Ok(BencodedValue::List(vec))
+        if end_found {
+            Ok(BencodedValue::List(vec))
+        } else {
+            Err(ParserError::InvalidEncoding(self.cursor, "end missing"))
+        }
     }
     /// Creates a new instance of parser, that parses the string s
     /// (bencoded string).
-    pub fn new(s: &str) -> Self {
+    pub fn new(s: Vec<u8>) -> Self {
         Self {
             cursor: 0,
-            characters: s.chars().collect(),
+            characters: s,
         }
     }
     /// Parses the string if it's a valid bencoded value and
@@ -203,24 +219,24 @@ impl Parser {
     pub fn bencoded_value(&mut self) -> Result<BencodedValue, ParserError> {
         self.peek()
             .map(|c| match c {
-                'i' => self.integer(),
-                '1'..='9' => self.byte_string(),
-                'l' => self.list(),
-                'd' => self.dictionary(),
-                _ => Err(ParserError::InvalidEncoding),
+                b'i' => self.integer(),
+                b'1'..=b'9' => self.byte_string(),
+                b'l' => self.list(),
+                b'd' => self.dictionary(),
+                _ => Err(ParserError::InvalidEncoding(self.cursor, "invalid bencode")),
             })
             .map_or_else(|| Err(ParserError::Empty), |r| r)
     }
 
     /// Peeks ahead one character without moving the cursor. Returns
     /// None if there is no more characters.
-    fn peek(&self) -> Option<char> {
+    fn peek(&self) -> Option<u8> {
         self.characters.get(self.cursor).copied()
     }
 
     /// Pops the next character, and advances the cursor. Returns None
     /// if there is no more characters.
-    fn pop(&mut self) -> Option<char> {
+    fn pop(&mut self) -> Option<u8> {
         self.characters.get(self.cursor).map(|c| {
             self.cursor += 1;
             *c
@@ -229,7 +245,7 @@ impl Parser {
 
     /// Pops the next character, advancing the cursor, if it matches,
     /// returns None otherwise.
-    fn take_if(&mut self, want: char) -> Option<char> {
+    fn take_if(&mut self, want: u8) -> Option<u8> {
         if let Some(c) = self.characters.get(self.cursor) {
             if *c == want {
                 self.cursor += 1;
@@ -273,7 +289,7 @@ fn check_zero(s: &str) -> bool {
 /// assert_eq!(value, expected);
 /// ```
 ///   
-pub fn parse(s: &str) -> Result<BencodedValue, ParserError> {
+pub fn parse(s: Vec<u8>) -> Result<BencodedValue, ParserError> {
     let mut parser = Parser::new(s);
     parser.bencoded_value()
 }
@@ -283,19 +299,19 @@ mod tests {
     use super::*;
     #[test]
     fn parse_bencoded_string_for_integer() {
-        let s = "i5050e";
+        let s = "i5050e".into();
         assert_eq!(parse(s).unwrap(), BencodedValue::Integer(5050));
     }
 
     #[test]
     fn parse_bencoded_string_for_negative_integer() {
-        let s = "i-55e";
+        let s = "i-55e".into();
         assert_eq!(parse(s).unwrap(), BencodedValue::Integer(-55));
     }
 
     #[test]
     fn parse_bencoded_string_with_invalid_integer() {
-        let s = "i-55ae";
+        let s = "i-55ae".into();
         assert_eq!(
             parse(s).unwrap_err(),
             ParserError::InvalidInteger("-55a".into())
@@ -304,7 +320,7 @@ mod tests {
 
     #[test]
     fn parse_bencoded_string_with_negative_zero_returns_error() {
-        let s = "i-0e";
+        let s = "i-0e".into();
         assert_eq!(
             parse(s).unwrap_err(),
             ParserError::InvalidInteger("-0".into())
@@ -312,7 +328,7 @@ mod tests {
     }
     #[test]
     fn parse_bencoded_string_with_zero_and_other_digit_after_returns_error() {
-        let s = "i05e";
+        let s = "i05e".into();
         assert_eq!(
             parse(s).unwrap_err(),
             ParserError::InvalidInteger("05".into())
@@ -321,7 +337,7 @@ mod tests {
 
     #[test]
     fn parse_bencoded_byte_string() {
-        let s = "4:test";
+        let s = "4:test".into();
         assert_eq!(
             parse(s).unwrap(),
             BencodedValue::ByteString("test".as_bytes().into())
@@ -330,7 +346,7 @@ mod tests {
 
     #[test]
     fn parse_bencoded_byte_string_with_length_more_than_one_digit() {
-        let s = "15:more characters";
+        let s = "15:more characters".into();
         assert_eq!(
             parse(s).unwrap(),
             BencodedValue::ByteString("more characters".as_bytes().into())
@@ -339,20 +355,20 @@ mod tests {
 
     #[test]
     fn parsing_bencoded_byte_string_with_invalid_length() {
-        let s = "4a:aaaa";
+        let s = "4a:aaaa".into();
         assert_eq!(parse(s).unwrap_err(), ParserError::InvalidByteStringLength);
     }
 
     #[test]
     fn parse_bencoded_list_of_integers() {
-        let s = "li1ei2ei3ee";
+        let s = "li1ei2ei3ee".into();
         let integers = (1..=3).map(BencodedValue::Integer).collect();
         assert_eq!(parse(s).unwrap(), BencodedValue::List(integers));
     }
 
     #[test]
     fn parse_bencoded_list_of_lists() {
-        let s = "lli1ei2ei3eeli4ei5ei6eeli7ei8ei9eee";
+        let s = "lli1ei2ei3eeli4ei5ei6eeli7ei8ei9eee".into();
         let lists = vec![
             BencodedValue::List(vec![
                 BencodedValue::Integer(1),
@@ -375,7 +391,7 @@ mod tests {
 
     #[test] // Modify when Dictionary is implemented
     fn parse_bencoded_list_of_different_types() {
-        let s = "lli1ei2ei3eei5e4:testd3:onei1eee";
+        let s = "lli1ei2ei3eei5e4:testd3:onei1eee".into();
         let list = vec![
             BencodedValue::List(vec![
                 BencodedValue::Integer(1),
@@ -394,14 +410,14 @@ mod tests {
 
     #[test]
     fn parse_bencoded_empty_list() {
-        let s = "le";
+        let s = "le".into();
         let list = vec![];
         assert_eq!(parse(s).unwrap(), BencodedValue::List(list));
     }
 
     #[test]
     fn parse_bencoded_dictionary_with_integer_values() {
-        let s = "d3:onei1e3:twoi2e5:threei3ee";
+        let s = "d3:onei1e3:twoi2e5:threei3ee".into();
         let mut parser = Parser::new(s);
         let dict = [
             (
@@ -426,7 +442,7 @@ mod tests {
 
     #[test]
     fn parse_bencoded_dictionary_with_different_types() {
-        let s = "d3:onei1e6:string3:str4:listli1ei2ei3ee4:dictd3:onei1e3:twoi2eee";
+        let s = "d3:onei1e6:string3:str4:listli1ei2ei3ee4:dictd3:onei1e3:twoi2eee".into();
         let dict = [
             (
                 BencodedValue::ByteString("one".into()),
@@ -464,7 +480,7 @@ mod tests {
 
     #[test]
     fn parse_bencoded_empty_dictionary() {
-        let s = "de";
+        let s = "de".into();
         let dict = BencodedValue::Dictionary(vec![]);
 
         assert_eq!(parse(s).unwrap(), dict);
@@ -472,19 +488,59 @@ mod tests {
 
     #[test]
     fn parse_bencoded_dictionary_missing_delimiter() {
-        let s = "d3:onei1e3:twoi2e5:threei3e";
-        assert_eq!(parse(s).unwrap_err(), ParserError::InvalidEncoding)
+        let s: Vec<u8> = "d3:onei1e3:twoi2e5:threei3e".into();
+        let len = s.len();
+        assert_eq!(
+            parse(s).unwrap_err(),
+            ParserError::InvalidEncoding(len, "end not found")
+        )
     }
 
     #[test]
     fn parse_empty_string() {
-        let s = "";
+        let s = "".into();
         assert_eq!(parse(s).unwrap_err(), ParserError::Empty)
     }
 
     #[test]
     fn parse_non_bencoded_string() {
-        let s = "abc";
-        assert_eq!(parse(s).unwrap_err(), ParserError::InvalidEncoding)
+        let s = "abc".into();
+        assert_eq!(
+            parse(s).unwrap_err(),
+            ParserError::InvalidEncoding(0, "invalid bencode")
+        )
+    }
+
+    #[test]
+    fn parse_non_utf8_bencoded_bytestring() {
+        let s = b"4:\xF0\x9f\x92\x96";
+        assert_eq!(
+            parse(s.to_vec()).unwrap(),
+            BencodedValue::ByteString(vec![240, 159, 146, 150])
+        )
+    }
+
+    #[test]
+    fn parse_dictionary_of_lists() {
+        let s = "d1:ali0ee1:bli1ei2eee".into();
+        let want = BencodedValue::Dictionary(vec![
+            (
+                BencodedValue::ByteString("a".into()),
+                BencodedValue::List(vec![BencodedValue::Integer(0)]),
+            ),
+            (
+                BencodedValue::ByteString("b".into()),
+                BencodedValue::List(vec![BencodedValue::Integer(1), BencodedValue::Integer(2)]),
+            ),
+        ]);
+        assert_eq!(parse(s).unwrap(), want)
+    }
+    #[test]
+    fn fail() {
+        let s = b"ld8:completei2928e10:incompletei41e8:intervali1800e5:peersl\
+            d2:ip12:59.153.22.957:peer id20:-TR3000-0h0piupby25d4:porti51413ee\
+            d2:ip15:195.123.212.1947:peer id20:-TR3000-hzhda5rbu05a4:porti51413ee\
+            d2:ip11:91.2.51.1157:peer id20:-TR3000-t1hx4p2wh5c34:porti51413eeeee";
+        parse(s.to_vec()).unwrap();
     }
 }

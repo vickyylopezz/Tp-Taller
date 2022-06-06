@@ -1,1 +1,12 @@
 pub mod bencode;
+pub mod block;
+pub mod chocked_status;
+pub mod client;
+pub mod client_error;
+pub mod peer;
+pub mod peer_builder;
+pub mod piece;
+pub mod pwp;
+pub mod torrent;
+pub mod tracker;
+pub mod utils;
