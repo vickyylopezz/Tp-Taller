@@ -1,0 +1,76 @@
+#left_pane {
+    background-color: rgb(187, 187, 187);
+}
+
+#title_box {
+    /* background-color: rgb(250, 223, 111); */
+    background-color:rgb(233, 193, 71);
+    font-size: 30px;
+    padding: 50px;
+}
+
+#card_title {
+    background-color: white;
+    font-size: 25px;
+    font-weight: bold;
+    padding-left: 150px;
+}
+
+#torrent_card_border{
+    background-color: black;
+}
+
+#torrent_card{
+    background-color: white;
+    border-color: black;
+}
+
+#card_text_box{
+    background-color:whitesmoke;
+    border-color: black;
+    font-size: 18px;
+    padding: 50px;
+}
+
+#torrent-container{
+    background-color: rgb(250, 223, 111);
+}
+
+#torrent-title-container{
+    background-color: rgb(250, 223, 111);
+}
+
+#torrent-title-box{
+    background-color:rgb(233, 193, 71);
+    font-size: 30px;
+    padding: 20px;
+}
+
+#torrent-left-file-image{
+    padding-left: 20px;
+}
+
+#app-parent{
+    background-color: #fffec2;
+}
+
+#scroll_window{
+    background-color: rgb(250, 223, 111);
+}
+
+#torrent-title-container-button{
+    background-color: white;
+}
+
+#live-title-box{
+    background-color:rgb(233, 193, 71);
+    font-size: 30px;
+    padding: 5px; 
+}
+
+#live-title-box {
+    background-color:rgb(233, 193, 71);
+    font-size: 30px;
+    padding: 20px;
+}
+

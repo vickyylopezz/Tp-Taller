@@ -1,10 +1,8 @@
-use crate::peer;
 use crate::pwp::message::PWPMessage;
 use crate::utils;
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-};
+use crate::{peer::peer_handler::Peer, pwp::protocol_error::ProtocolError};
+use std::net::SocketAddr;
+use std::{io::Read, io::Write, net::TcpStream};
 
 #[derive(Debug)]
 pub enum PWPError {
@@ -16,22 +14,35 @@ pub enum PWPError {
     PeerConnection,
     Read,
     EmptyBytes,
+    MappingError,
 }
 
 #[derive(Debug)]
 pub struct PWPStream(pub TcpStream);
 
 impl PWPStream {
-    pub fn connect(peer: &peer::Peer, info_hash: Vec<u8>) -> Result<Self, PWPError> {
-        let socket = format!("{}:{}", peer.ip, peer.port);
-        let mut stream = TcpStream::connect(socket).map_err(|_| PWPError::Connection)?;
-        let peer_id = peer.peer_id.ok_or(PWPError::MissingPeerID)?;
+    pub fn connect(peer: &Peer, info_hash: Vec<u8>) -> Result<Self, ProtocolError> {
+        let ip = match peer.ip {
+            Some(it) => it,
+            None => return Err(ProtocolError::Connection),
+        };
+        //let socket = format!("{}:{}", ip, peer.port);
+        let socket = SocketAddr::new(ip, peer.port);
+        //println!("{}", socket);
+        let mut stream = TcpStream::connect(socket).map_err(|_| ProtocolError::Connection)?;
+        //println!("{:?}", stream);
+        let peer_id = peer.peer_id.ok_or(ProtocolError::MissingPeerID)?;
         let msg = handshake_msg(info_hash, &peer_id[..]);
+        //let mut stream = stream;
+        stream
+            .write_all(&msg)
+            .map_err(|_| ProtocolError::Handshake)?;
 
-        stream.write_all(&msg).map_err(|_| PWPError::Handshake)?;
-        println!("Handshake sent");
+        //println!("Handshake sent");
+
         Ok(PWPStream(stream))
     }
+
     /// msg format <length prefix><message ID><payload>
     pub fn send(&mut self, msg: PWPMessage) -> Result<(), PWPError> {
         let bytes = match msg {
@@ -115,35 +126,27 @@ impl PWPStream {
                     Err(PWPError::WrongSizeRead)
                 }
             }
-            Err(_) => Err(PWPError::WrongSizeRead),
+            Err(_) => Err(PWPError::ReadError),
         }
     }
 
     /// Interpretates the stream of bytes recieved from the peer.
     pub fn read(&mut self) -> Result<PWPMessage, PWPError> {
-        let array = match self.read_bytes(4) {
-            Ok(it) => it,
-            Err(e) => match e {
-                PWPError::EmptyBytes => vec![253],
-                PWPError::Read => return Err(PWPError::Read),
-                _ => return Err(PWPError::WrongSizeRead),
-            },
-        };
-        if array[0] == 253 {
-            return Ok(PWPMessage::new(&b'E', &mut &array[..]));
+        let array = self.read_bytes(4)?;
+        if array[3] == 0 {
+            return PWPMessage::new(&b'K', &mut &array[..]).ok_or(PWPError::MappingError);
         }
         let msg_len = from_u32_be(&mut &array[..]).ok_or(PWPError::WrongSizeRead)?;
 
-        let new_msg = if msg_len > 0 {
+        if msg_len > 0 {
             let msg = self.read_bytes(msg_len).unwrap();
-            PWPMessage::new(&msg[0], &mut &msg[1..])
+            PWPMessage::new(&msg[0], &mut &msg[1..]).ok_or(PWPError::MappingError)
         } else {
-            PWPMessage::new(&b'K', &mut &array[..])
-        };
-
-        Ok(new_msg)
+            PWPMessage::new(&b'K', &mut &array[..]).ok_or(PWPError::MappingError)
+        }
     }
 
+    /// Reads a handshake message and returns it.
     pub fn read_handshake(&mut self) -> Result<PWPMessage, PWPError> {
         let msg_len = 68; // 49 + 19 --> 49 + len(pstr)
         let msg = match self.read_bytes(msg_len) {
@@ -151,10 +154,11 @@ impl PWPStream {
             Err(_) => return Err(PWPError::WrongSizeRead),
         };
 
-        let new_msg = PWPMessage::new(&msg[4], &mut &msg[0..]);
+        PWPMessage::new(&msg[4], &mut &msg[0..]).ok_or(PWPError::MappingError)
+    }
 
-        println!("Handshake recieved");
-        Ok(new_msg)
+    pub fn new(stream: TcpStream) -> Self {
+        Self(stream)
     }
 }
 

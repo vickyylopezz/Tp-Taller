@@ -1,0 +1,28 @@
+#[derive(Debug, PartialEq, Eq)]
+/// Represents the possible errors when running the client.
+pub enum ClientError {
+    InvalidInfo,
+    TorrentError,
+    HandshakeError,
+    BitfieldError,
+    InterestedError,
+    UnchockedError,
+    FileError,
+    StreamError,
+    PieceError,
+    TrackerError,
+    PeersError,
+    HandlerError,
+    LoggerError,
+    StorageError,
+    RequestNotSentError,
+    ThreadError,
+    HandlerMessageError,
+    SentError,
+    NotExpectedMessageError,
+    RequestError,
+    TorrentFileError,
+    MetainfoError,
+    NoResponseDataError,
+    ServerError,
+}

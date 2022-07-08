@@ -1,4 +1,4 @@
-use crate::peer::Peer;
+use crate::peer::peer_handler::Peer;
 use crate::tracker::response::tracker_response::TrackerResponse;
 use crate::tracker::response::tracker_response::TrackerResponseMode;
 

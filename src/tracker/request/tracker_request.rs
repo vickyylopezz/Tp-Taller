@@ -2,21 +2,23 @@ use crate::tracker::request::querystring::Querystring;
 use crate::tracker::request::tracker_request_error::TrackerRequestError;
 use crate::tracker::request::tracker_request_event::TrackerRequestEvent;
 use crate::tracker::url_encoder::encoder::URLEncoded;
+use log::debug;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use std::fmt::Write;
 use std::net::{IpAddr, TcpStream};
 
-/// # TrackerRequest
-/// This type is scoped on the handling of the request of the tracker
+/// This type is scoped on the handling of the request of the tracker.
 #[derive(Debug, PartialEq, Eq)]
 pub struct TrackerRequest {
-    /// Describes the file(s) of the torrent. There are two
-    /// This value is going to be hashed with sha1  
+    /// Describes the file(s) of the torrent. There are two.
+    /// This value is going to be hashed with sha1.
     info_hash: [u8; 20],
-    /// Unique identificator of the peer
-    peer_id: [u8; 20],
-    /// Port of the client
+    /// Announce URL of the tracker
+    pub announce: String,
+    /// Peers's unique identificator.
+    pub peer_id: [u8; 20],
+    /// Client's port.
     port: u16,
     /// The total amount uploaded since the client sent the 'started' event to the tracker
     uploaded: u64,
@@ -28,11 +30,13 @@ pub struct TrackerRequest {
     ip: Option<IpAddr>,
     /// Possible status of the request (started, stopped, completed)
     event: TrackerRequestEvent,
+    /// Indicates if the client accepts a compact response
+    compact: u8,
 }
 
 impl TrackerRequest {
     /// Creates a new TrackerRequest structure.
-    pub fn new(info: [u8; 20]) -> Self {
+    pub fn new(info: [u8; 20], announce: String, port: u16) -> Self {
         Self {
             info_hash: info,
             peer_id: {
@@ -44,12 +48,14 @@ impl TrackerRequest {
                     .try_into()
                     .unwrap()
             },
-            port: 0,
+            port,
             ip: None,
             uploaded: 0,
             downloaded: 0,
             left: 0,
             event: TrackerRequestEvent::Started,
+            announce,
+            compact: 0,
         }
     }
 
@@ -82,6 +88,7 @@ impl TrackerRequest {
         querystring.push_str("info_hash=");
 
         let mut url;
+
         querystring.push_str(match URLEncoded::new().urlencode(&self.info_hash) {
             Ok(it) => {
                 url = it.get_url();
@@ -102,8 +109,7 @@ impl TrackerRequest {
             write!(querystring, "&ip={}", ip).map_err(|_| TrackerRequestError::WriteError)?;
         }
         // write!(querystring, "&port={}", self.port).map_err(|_| TrackerRequestError::WriteError)?;
-        write!(querystring, "&port={}", 6881).map_err(|_| TrackerRequestError::WriteError)?;
-
+        write!(querystring, "&port={}", self.port).map_err(|_| TrackerRequestError::WriteError)?;
         write!(querystring, "&downloaded={}", self.downloaded)
             .map_err(|_| TrackerRequestError::WriteError)?;
 
@@ -120,6 +126,7 @@ impl TrackerRequest {
             }
         )
         .map_err(|_| TrackerRequestError::WriteError)?;
+        //write!(querystring, "&compact={}", self.compact).map_err(|_| TrackerRequestError::WriteError)?;
 
         Ok(Querystring(querystring))
     }

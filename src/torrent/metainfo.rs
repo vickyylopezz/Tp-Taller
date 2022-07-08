@@ -10,7 +10,7 @@ static METAINFO_REQUIERED_KEYS: [&[u8]; 2] = [b"info", b"announce"];
 
 /// Contains the metadata from the torrent file. Only the announce and
 /// info fields are required.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Metainfo {
     /// Announce URL of the tracker
     pub announce: String,
@@ -39,6 +39,7 @@ impl Metainfo {
             .dictionary()?
             .into_iter()
             .collect::<HashMap<BencodedValue, BencodedValue>>();
+
         METAINFO_REQUIERED_KEYS
             .iter()
             .map(|v| BencodedValue::ByteString(v.to_vec()))
@@ -51,6 +52,7 @@ impl Metainfo {
                     k.byte_string()
                         .and_then(|s| build_metainfo_fields(&mut metainfo, &s[..], v))?;
                 }
+
                 Some(metainfo.build())
             })
             .flatten()
@@ -68,6 +70,7 @@ pub fn read_torrent<R: io::Read>(mut reader: R) -> Result<Metainfo, TorrentError
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).map_err(TorrentError::File)?;
     let bencoded_dictionary = parser::parse(buf).map_err(TorrentError::Parse)?;
+
     Metainfo::new(bencoded_dictionary).ok_or(TorrentError::InvalidTorrent)
 }
 
@@ -82,6 +85,7 @@ fn build_metainfo_fields(
         b"info" => {
             let dict = v.dictionary()?;
             let info = info::Info::new(dict)?;
+
             metainfo.info(info);
         }
         b"announce" => {
@@ -89,21 +93,6 @@ fn build_metainfo_fields(
             metainfo.announce(String::from_utf8(bytes).ok()?);
         }
         b"announce-list" => {
-            // TODO: Add correct behaviour
-            // println!(
-            //     "{:?}",
-            //     v.clone()
-            //         .list()
-            //         .into_iter()
-            //         .flatten()
-            //         .filter_map(BencodedValue::list)
-            //         .flatten()
-            //         .map(|e| {
-            //             let bytes = e.byte_string()?;
-            //             String::from_utf8(bytes).ok()
-            //         })
-            //         .collect::<Option<Vec<String>>>()
-            // );
             let announce_list = v
                 .list()
                 .into_iter()
@@ -134,6 +123,8 @@ fn build_metainfo_fields(
             let bytes = v.byte_string()?;
             metainfo.encoding(Some(String::from_utf8(bytes).ok()?));
         }
+
+        b"httpseeds" => {}
         _ => return None,
     }
     Some(())

@@ -2,28 +2,39 @@ use std::{fs::File, io::Write};
 
 use sha1::{Digest, Sha1};
 
-use crate::block::Block;
+use crate::storage::block::Block;
 
 static BLOCK_SIZE: i64 = 16384; // 2^14
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum PieceError {}
+pub enum PieceError {
+    FewBlocks,
+    File,
+    Write,
+    Block,
+    DifferentHash,
+}
 
 /// Represents a portion of the data to be downloaded which is described in the metainfo
 /// of the torrent file and can be verified by a SHA1 hash. It is made of many Blocks.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Piece {
+    /// Length of the piece.
     pub length: i64,
-    pub piece_length: i64,
+    /// Index of the piece in the torrent file.
     pub index: i64,
+    /// List of blocks of the piece.
     pub blocks: Vec<Block>,
+    /// Hash of the piece. It is used to verify if the piece was correctly downloaded.
     pub hash: Vec<u8>,
+    /// File name of the torrent file to be downloaded.
+    pub file_name: String,
 }
 
 impl Piece {
     /// Returns a pice of the file to be downloaded.
     /// Creates de Blocks of the piece.
-    pub fn new(length: i64, index: i64, piece_length: i64, hash: Vec<u8>) -> Self {
+    pub fn new(length: i64, index: i64, hash: Vec<u8>, file_name: String) -> Self {
         let mut blocks: Vec<Block> = vec![];
         let num_blocks = ((length as f64) / (BLOCK_SIZE as f64)).ceil() as i64;
 
@@ -36,16 +47,16 @@ impl Piece {
                 }
             };
 
-            let block = Block::new(i, block_length);
+            let block = Block::new(i, block_length, index);
             blocks.push(block);
         }
 
         Piece {
             length,
-            piece_length,
             index,
             hash,
             blocks,
+            file_name,
         }
     }
 
@@ -91,5 +102,11 @@ impl Piece {
             self.write_piece(file, piece_data);
         }
         Ok(())
+    }
+
+    /// Adds a block of data to the lists of blocks of the piece.
+    pub fn add_block(&mut self, block_index: i64, data: Vec<u8>) {
+        let block = &mut self.blocks[block_index as usize];
+        block.data = Some(data);
     }
 }

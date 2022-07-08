@@ -6,7 +6,7 @@ static FILEINFO_REQUIRED_KEYS: [&[u8]; 4] = [b"piece length", b"pieces", b"name"
 
 /// This enum represents all the possible variants of the info
 /// dictionary. The empty variant has no use outside initialization.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InfoMode {
     /// Placeholder, only used for initialization
     Empty,
@@ -16,13 +16,13 @@ pub enum InfoMode {
 }
 
 /// Wrapper over the the [`InfoMode`] enum.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Info(pub InfoMode);
 
 /// Container for the data in the dictionary associated with the info
 /// key when in Single File Mode. The fields: `length`, `name`,
 /// `piece_length` and `pieces` must be always present
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SingleFileData {
     /// Length of the file to be downloaded in bytes
     pub length: i64,
@@ -53,6 +53,7 @@ impl Info {
         let dict = info
             .into_iter()
             .collect::<HashMap<BencodedValue, BencodedValue>>();
+
         let mut required = FILEINFO_REQUIRED_KEYS
             .iter()
             .map(|v| BencodedValue::ByteString(v.to_vec()));

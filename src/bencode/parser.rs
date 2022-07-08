@@ -535,12 +535,4 @@ mod tests {
         ]);
         assert_eq!(parse(s).unwrap(), want)
     }
-    #[test]
-    fn fail() {
-        let s = b"ld8:completei2928e10:incompletei41e8:intervali1800e5:peersl\
-            d2:ip12:59.153.22.957:peer id20:-TR3000-0h0piupby25d4:porti51413ee\
-            d2:ip15:195.123.212.1947:peer id20:-TR3000-hzhda5rbu05a4:porti51413ee\
-            d2:ip11:91.2.51.1157:peer id20:-TR3000-t1hx4p2wh5c34:porti51413eeeee";
-        parse(s.to_vec()).unwrap();
-    }
 }
