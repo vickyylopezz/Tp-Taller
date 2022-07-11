@@ -1,12 +1,12 @@
 use crate::client::bitfield_error::BitFieldError;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Status {
     NotDownload,
     InProgress,
     Downloaded,
 }
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BitFieldDownload {
     pieces: Vec<Status>,
     /// Number of pieces
@@ -86,63 +86,40 @@ impl BitFieldDownload {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn peer_has_the_ninth_piece_of_sixteen() {
-//         let bitfield = BitField::new_from_vec(vec![0, 128], 16);
-//         let got = bitfield.has_piece(8);
-//         let want = Some(true);
-//         assert_eq!(got, want);
-//     }
+    #[test]
+    fn mark_the_twentieth_piece_as_downloaded() {
+        let mut bitfield = BitFieldDownload::new(27).unwrap();
+        let previous = bitfield.has_piece(20);
+        bitfield.set_piece(20, Status::Downloaded);
+        let got = bitfield.has_piece(20);
+        let want = Some(true);
 
-//     #[test]
-//     fn ask_for_the_fifteenth_piece_when_there_is_only_fourteen() {
-//         let bitfield = BitField::new_from_vec(vec![255, 252], 14);
-//         let got = bitfield.has_piece(15);
-//         let want = None;
-//         assert_eq!(got, want);
-//     }
+        assert_eq!(previous, Some(false));
+        assert_eq!(got, want);
+    }
 
-//     #[test]
-//     fn mark_the_twentieth_piece_as_downloaded() {
-//         let mut bitfield = BitField::new(27).unwrap();
-//         let previous = bitfield.has_piece(20);
-//         bitfield.set_piece(20);
-//         let got = bitfield.has_piece(20);
-//         let want = Some(true);
+    #[test]
+    fn trying_to_mark_pieces_that_are_not_present_returns_none() {
+        let mut bitfield = BitFieldDownload::new(27).unwrap();
+        let previous = bitfield.has_piece(28);
+        bitfield.set_piece(28, Status::NotDownload);
+        let got = bitfield.has_piece(28);
+        let want = None;
 
-//         assert_eq!(previous, Some(false));
-//         assert_eq!(got, want);
-//     }
+        assert_eq!(previous, None);
+        assert_eq!(got, want);
+    }
 
-//     #[test]
-//     fn trying_to_mark_pieces_that_are_not_present_returns_none() {
-// 	    let mut bitfield = BitField::new(27).unwrap();
-//         let previous = bitfield.has_piece(28);
-//         bitfield.set_piece(28);
-//         let got = bitfield.has_piece(28);
-//         let want = None;
+    #[test]
+    fn create_a_bitfield_with_zero_pieces() {
+        let got = BitFieldDownload::new(0);
+        println!("got: {:?}", got);
+        let want: Option<BitFieldDownload> = None;
 
-//         assert_eq!(previous, None);
-//         assert_eq!(got, want);
-//     }
-
-//     #[test]
-//     fn create_a_bitfield_with_zero_pieces() {
-//         let got = BitField::new(0);
-//         println!("got: {:?}", got);
-//         let want : Option<BitField> = None;
-
-//         assert_eq!(None, want);
-//     }
-
-//     fn get_pieces_left_to_download() {
-//         let bitfield = BitField::new_from_vec(vec![0b11111111, 0b10000000, 0b00001111], 23);
-//         let got = bitfield.get_missing();
-//         let want = vec![9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
-//         assert_eq!(got, want);
-//     }
-// }
+        assert_eq!(None, want);
+    }
+}

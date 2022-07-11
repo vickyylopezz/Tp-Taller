@@ -1,15 +1,12 @@
 pub mod bencode;
 pub mod client;
 pub mod config;
-mod connection;
 pub mod download;
 pub mod log;
 pub mod peer;
-mod peer_info;
 pub mod pwp;
 pub mod server;
 pub mod storage;
-mod threadpool;
 pub mod torrent;
 pub mod tracker;
 pub mod ui;

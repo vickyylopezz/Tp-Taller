@@ -171,7 +171,6 @@ impl TorrentView {
 
     pub fn change_view(&mut self, parent: Box) {
         self.index = 0;
-        self.rigth_arrow.set_sensitive(true);
         self.left_arrow.set_sensitive(false);
 
         //lp.live_bt.set_sensitive(true);
@@ -210,7 +209,10 @@ impl TorrentView {
         for c in cards {
             self.torrents.push(c);
         }
-
+        self.rigth_arrow.set_sensitive(true);
+        if self.torrents.len() == 1 {
+            self.rigth_arrow.set_sensitive(false);
+        }
         for l in self.title.children() {
             self.title.remove(&l);
         }
@@ -230,18 +232,34 @@ impl TorrentView {
     pub fn next_torrent(&mut self, direction: &str) {
         if direction == "rigth" {
             self.index += 1;
-            if self.index >= (self.torrents.len() - 1) {
+            // if self.index >= (self.torrents.len() - 1) {
+            //     self.rigth_arrow.set_sensitive(false);
+            //     self.left_arrow.set_sensitive(true);
+            // }
+            self.rigth_arrow.set_sensitive(true);
+            self.left_arrow.set_sensitive(true);
+            if self.index == 0 {
+                self.left_arrow.set_sensitive(false);
+            }
+            if self.index == self.torrents.len() - 1 {
                 self.rigth_arrow.set_sensitive(false);
-                self.left_arrow.set_sensitive(true);
             }
             self.update_torrent_en_pos(self.index)
         } else if direction == "left" {
             self.index -= 1;
+            // if self.index == 0 {
+            //     self.left_arrow.set_sensitive(false);
+            //     self.rigth_arrow.set_sensitive(true);
+            // } else {
+            //     self.left_arrow.set_sensitive(true);
+            // }
+            self.rigth_arrow.set_sensitive(true);
+            self.left_arrow.set_sensitive(true);
             if self.index == 0 {
                 self.left_arrow.set_sensitive(false);
-                self.rigth_arrow.set_sensitive(true);
-            } else {
-                self.left_arrow.set_sensitive(true);
+            }
+            if self.index == self.torrents.len() - 1 {
+                self.rigth_arrow.set_sensitive(false);
             }
             self.update_torrent_en_pos(self.index)
         }
@@ -268,13 +286,24 @@ impl TorrentView {
 
         self.update(self.index);
 
-        if self.index >= (self.torrents.len() - 1) {
-            self.rigth_arrow.set_sensitive(false);
-            self.left_arrow.set_sensitive(true);
-        } else if self.index == 0 {
-            self.rigth_arrow.set_sensitive(true);
+        self.rigth_arrow.set_sensitive(true);
+        self.left_arrow.set_sensitive(true);
+        if self.index == 0 {
             self.left_arrow.set_sensitive(false);
         }
+        if self.index == self.torrents.len() - 1 {
+            self.rigth_arrow.set_sensitive(false);
+        }
+        // if self.index >= (self.torrents.len() - 1) && self.index != 0{
+        //     self.rigth_arrow.set_sensitive(false);
+        //     self.left_arrow.set_sensitive(true);
+        // } else if self.index == 0 && self.torrents.len() != 1{
+        //     self.rigth_arrow.set_sensitive(true);
+        //     self.left_arrow.set_sensitive(false);
+        // } else if self.torrents.len() == 1 {
+        //     self.rigth_arrow.set_sensitive(false);
+        //     self.left_arrow.set_sensitive(false);
+        // }
         parent.remove(parent.children().get(1).unwrap());
         parent.add(&self.torrent_container);
         parent.show_all();

@@ -1,7 +1,5 @@
 use std::{collections::HashMap, io};
 
-use log::debug;
-
 /// All posible configuration parameters
 const KEYS: [&str; 4] = ["port", "logs_dir", "downloads_dir", "torrents_dir"];
 
@@ -59,7 +57,7 @@ impl Config {
         self.tcp_port
     }
 
-    pub fn logs(&mut self) -> String {
+    pub fn logs(&self) -> String {
         self.logs_directory.clone()
     }
 
@@ -89,7 +87,7 @@ mod tests {
 
     #[test]
     fn the_config_is_created_correctly() {
-        let p = b"port=80\nlogs_dir=/home/test\ndownloads_dir=/home/downloads\ntorrents_dir=/home/torrents";
+        let p = b"port=80\nlogs_dir=/home/test\ndownloads_dir=/home/downloads\ntorrents_dir=/home/torrents\nmode=server";
         let got = Config::new(&p[..]).unwrap();
         let want = Config {
             tcp_port: 80,

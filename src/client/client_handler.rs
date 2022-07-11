@@ -1,28 +1,19 @@
-use log::info;
+use log::error;
 
 use crate::client::client_error::ClientError;
-use crate::client::client_handler::ClientError::HandlerMessageError;
-use crate::client::client_handler::ClientError::RequestNotSentError;
-use crate::client::client_handler::ClientError::SentError;
-use crate::client::client_handler::ClientError::ThreadError;
-use crate::client::client_handler::ClientError::TrackerError;
 use crate::client::torrent_file::TorrentFile;
 use crate::config;
 use crate::download::handler::HandlerDownload;
+
 use crate::log::logger::LogHandle;
 use crate::log::logger::Logger;
+use crate::peer::peer_handler::Peer;
 use crate::server::server_handler::Server;
-use crate::storage::piece::Piece;
-use crate::storage::store::Store;
-use crate::storage::store::StoreClientMessage;
-use crate::storage::store::StoreMessage;
 
-use crate::torrent::info::Info;
-use crate::tracker::handler::HandlerClientMessage;
-use crate::tracker::handler::HandlerClientMessage::ResponseMessage;
-use crate::tracker::handler::{Handler, HandlerMessage};
+use crate::tracker::handler::Handler;
 use crate::tracker::request::tracker_request::TrackerRequest;
 
+use crate::tracker::response::tracker_response::TrackerResponse;
 use crate::tracker::response::tracker_response::TrackerResponseMode::Failure;
 use crate::tracker::response::tracker_response::TrackerResponseMode::Response;
 use crate::ui::render::LiveViewRawData;
@@ -31,13 +22,16 @@ use crate::ui::render::MessagesFromMain;
 use crate::ui::render::RawData;
 use crate::ui::render::Render;
 use crate::ui::render::RequestMessage;
+use crate::ui::render::TorrentId;
 use crate::ui::render::TorrentViewRawData;
 use crate::utils;
 use std::ffi::OsStr;
 use std::fs;
-use std::fs::File;
 
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::path::Path;
+use std::sync::mpsc::TryRecvError;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
@@ -54,88 +48,16 @@ pub struct Client {
 impl Client {
     /// Creates a new [`Client`] with a vector of [`TorrentFile`].
     pub fn new(render: Arc<Mutex<Render>>, config: &config::Config) -> Result<Self, ClientError> {
-        let files = get_files(Path::new(&config.torrents()));
+        let files = get_files(Path::new(&config.torrents())).ok_or(ClientError::FileError)?;
         let mut vec = Vec::<TorrentFile>::with_capacity(files.len());
-        for file in &files {
-            vec.push(TorrentFile::new(file.clone()).map_err(|_| ClientError::TorrentFileError)?);
+        for file in files {
+            vec.push(TorrentFile::new(file).map_err(|_| ClientError::TorrentFileError)?);
         }
-
-        //run(vec, render);
 
         Ok(Client {
             torrents: Arc::new(Mutex::new(vec)),
             render,
         })
-    }
-
-    /// Makes multiple requests concurrently to the traker
-    /// and gets the tracker response of each request.
-    fn handle_request(
-        mut file: &mut TorrentFile,
-        tracker_request: TrackerRequest,
-        handler: &Handler,
-    ) -> Result<(), ClientError> {
-        handler
-            .send(HandlerMessage::RequestMessage(tracker_request))
-            .map_err(|_| ClientError::HandlerError)?;
-
-        // Receive a Sent Message from Handler
-        match handler.receive() {
-            Ok(m) => {
-                match m {
-                    ResponseMessage(_) => Err(RequestNotSentError),
-                    HandlerClientMessage::Sent => {
-                        // Receive a TrackerResponse Message from Handler
-                        match handler.receive() {
-                            Ok(msg) => match msg {
-                                ResponseMessage(response) => match response.0 {
-                                    Failure => Err(TrackerError),
-                                    Response(response_data) => {
-                                        file.response = Some(response_data);
-                                        Ok(())
-                                    }
-                                },
-                                HandlerClientMessage::Sent => Err(SentError),
-                                HandlerClientMessage::Terminate => Err(ThreadError),
-                                _ => Err(TrackerError),
-                            },
-                            Err(_) => Err(HandlerMessageError),
-                        }
-                    }
-                    HandlerClientMessage::Terminate => Err(ThreadError),
-                    _ => Err(TrackerError),
-                }
-            }
-            Err(_) => Err(HandlerMessageError),
-        }
-    }
-
-    /// Downloads the pieces of the torrent file got by the peers concurrently in disk.
-    fn handle_store(
-        storage: &Store,
-        mut log_handle: LogHandle,
-        piece: Piece,
-        file: &mut TorrentFile,
-    ) -> Result<(), ClientError> {
-        storage
-            .send(StoreMessage::PieceMessage(piece))
-            .map_err(|_| ClientError::StorageError)?;
-
-        match storage.receive() {
-            Ok(m) => match m {
-                StoreClientMessage::Stored(piece_index, _) => {
-                    file.bitfield.set_piece(piece_index as usize);
-                    info!("Downloaded piece: {}", piece_index);
-                    log_handle.info(&format!("Downloaded piece: {}", piece_index));
-                }
-                _ => return Err(ClientError::StorageError),
-            },
-            Err(_) => {
-                return Err(ClientError::StorageError);
-            }
-        };
-
-        Ok(())
     }
 
     /// Implements the flow of the program.
@@ -144,286 +66,321 @@ impl Client {
     pub fn run(
         torrents: Arc<Mutex<Vec<TorrentFile>>>,
         render: Arc<Mutex<Render>>,
-        mut config: config::Config,
+        config: config::Config,
+        logger: &Logger,
     ) -> Result<(JoinHandle<()>, JoinHandle<()>), ClientError> {
-        let torrents_clone = Arc::clone(&torrents);
-        let data = get_info(
-            &torrents_clone.lock().unwrap(),
-            crate::ui::render::RequestMessage::MainView,
-        );
-        render
-            .lock()
-            .unwrap()
-            .send_main(MessagesFromMain::MainViewMsg(MainViewRawData {
-                raw_data: data,
-            }))
-            .unwrap();
+        //Listener ui
+        let mut log_handle = logger.new_handler();
+        let thread_listener_ui = listener_ui(Arc::clone(&torrents), render, log_handle.clone())
+            .ok_or(ClientError::ThreadError)?;
 
-        let thread = thread::spawn(move || loop {
-            let msg = render.lock().unwrap().receive_main();
+        //Config
 
-            match msg {
-                Ok(it) => match it {
-                    crate::ui::render::RequestMessage::MainView => {
-                        let data = get_info(&torrents_clone.lock().unwrap(), it);
-                        render
-                            .lock()
-                            .unwrap()
-                            .send_main(MessagesFromMain::MainViewMsg(MainViewRawData {
-                                raw_data: data,
-                            }))
-                            .unwrap();
-                    }
-                    crate::ui::render::RequestMessage::TorrentView => {
-                        let data = get_info(&torrents_clone.lock().unwrap(), it);
-
-                        render
-                            .lock()
-                            .unwrap()
-                            .send_main(MessagesFromMain::TorrentViewMsg(TorrentViewRawData {
-                                raw_data: data,
-                            }))
-                            .unwrap();
-                    }
-                    crate::ui::render::RequestMessage::LiveView(_) => {
-                        let data = get_info(&torrents_clone.lock().unwrap(), it);
-                        render
-                            .lock()
-                            .unwrap()
-                            .send_main(MessagesFromMain::LiveViewMsg(LiveViewRawData {
-                                raw_data: data[0].clone(),
-                            }))
-                            .unwrap();
-                    }
-                    crate::ui::render::RequestMessage::Terminate => continue,
-                },
-                Err(_) => continue,
-            }
-        });
-
-        let torrents_clone = Arc::clone(&torrents);
-
-        let port = config.tcp_port();
-        let downloads_dir = config.downloads();
-        let logs_dir = config.logs();
-
-        let client_handler = Some(thread::spawn(move || {
-            let log = File::create(Path::new(&format!("{}config.log", config.logs())))
-                .map_err(|_| ClientError::LoggerError)
-                .unwrap();
-
-            let logger = Logger::new(log);
-            let log_handle = logger.new_handler();
-
-            //	    let mut server = Server::new(Arc::clone(&torrents_clone));
-            //	    let server_thread = server.run(port, log_handle.clone()).unwrap();
-
-            let handler = Handler::new(log_handle);
-
-            let len = torrents_clone.lock().unwrap().len();
-            for i in 0..len {
-                let torrents_clone = Arc::clone(&torrents);
-
-                let info_hash =
-                    utils::hash_info(&(*torrents_clone.lock().unwrap())[i].metainfo.info.bencode());
-
-                let tracker_request = TrackerRequest::new(
-                    info_hash,
-                    (*torrents_clone.lock().unwrap())[i]
-                        .metainfo
-                        .announce
-                        .clone(),
-                    port,
-                );
-
-                // -------------------- Logger --------------------
-                let Info(mode) = (*torrents_clone.lock().unwrap())[i].metainfo.info.clone();
-                let info = match mode {
-                    crate::torrent::info::InfoMode::Empty => todo!(),
-                    crate::torrent::info::InfoMode::SingleFile(it) => it,
-                };
-
-                let log = File::create(Path::new(&format!("{}{}.log", logs_dir, info.name)))
-                    .map_err(|_| ClientError::LoggerError)
-                    .unwrap();
-
-                let logger = Logger::new(log);
-                let logger_handler = logger.new_handler();
-
-                // -------------------- Tracker --------------------
-
-                Client::handle_request(
-                    &mut (*torrents_clone.lock().unwrap())[i],
-                    tracker_request,
-                    &handler,
-                )
-                .map_err(|_| ClientError::HandlerError)
-                .unwrap();
-
-                let mut server = Server::new(Arc::clone(&torrents_clone));
-                server
-                    .run(port, downloads_dir.clone(), logger_handler.clone())
-                    .unwrap();
-
-                let downloads = downloads_dir.clone();
-                let inside = thread::spawn(move || {
-                    let data = match (*torrents_clone.lock().unwrap())[i].response.clone() {
-                        Some(data) => data,
-                        None => return,
-                    };
-                    let Info(mode) = (*torrents_clone.lock().unwrap())[i].metainfo.info.clone();
-                    let info = match mode {
-                        crate::torrent::info::InfoMode::Empty => todo!(),
-                        crate::torrent::info::InfoMode::SingleFile(it) => it,
-                    };
-                    let handler_download = HandlerDownload::new(
-                        info_hash.to_vec(),
-                        data.peers,
-                        (info.length / info.piece_length) as u32,
-                        info.piece_length as u32,
-                        logger_handler.clone(),
-                        info.name.clone(),
-                        info.pieces,
+        //Thread cliente
+        let client_handler = thread::spawn(move || {
+            match start_client(config, log_handle.clone(), torrents) {
+                Some(_) => (),
+                None => {
+                    error!("An error ocurred while downloading the torrents, closing client...");
+                    log_handle.error(
+                        "An error ocurred while downloading the torrents, closing client...",
                     );
-
-                    let storage = Store::new(downloads.clone(), logger_handler.clone());
-                    loop {
-                        match handler_download.receive() {
-                            Ok(it) => match it {
-                                crate::download::handler::HandlerMessage::Piece(piece) => {
-                                    Client::handle_store(
-                                        &storage,
-                                        logger_handler.clone(),
-                                        piece,
-                                        &mut (*torrents_clone.lock().unwrap())[i],
-                                    )
-                                    .map_err(|_| ClientError::StorageError)
-                                    .unwrap()
-                                }
-                                crate::download::handler::HandlerMessage::PeerConnected(peer) => {
-                                    (*torrents_clone.lock().unwrap())[i]
-                                        .peers_connected
-                                        .push(peer)
-                                }
-                                crate::download::handler::HandlerMessage::Terminate => break,
-                                crate::download::handler::HandlerMessage::HaveAllPieces => break,
-                                _ => continue,
-                            },
-                            Err(_) => continue,
-                        }
-                    }
-
-                    drop(handler_download);
-                    //		    drop(server);
-                    storage
-                        .store_file(
-                            info.name.clone(),
-                            info.length as u64,
-                            (info.length / info.piece_length) as i32,
-                            info.piece_length as u64,
-                            &downloads,
-                        )
-                        .map_err(|_| ClientError::StorageError)
-                        .unwrap();
-
-                    drop(storage);
-                });
-                drop(server);
-                inside.join().unwrap();
-            }
-
-            drop(handler);
-        }));
-
-        Ok((client_handler.unwrap(), thread))
+                }
+            };
+        });
+        Ok((client_handler, thread_listener_ui))
     }
 }
+
+/// Starts the main client thread, starting both the download and
+/// serving processes
+fn start_client(
+    config: config::Config,
+    logger: LogHandle,
+    torrents: Arc<Mutex<Vec<TorrentFile>>>,
+) -> Option<()> {
+    //Server
+    let mut server = Server::new(Arc::clone(&torrents));
+    server
+        .run(config.tcp_port(), config.logs(), logger.clone())
+        .ok()?;
+    download_torrents(torrents, config, logger)
+}
+
+/// Genrates a thread for each torrent, where the client will interact
+/// with the associated peers
+fn download_torrents(
+    torrents: Arc<Mutex<Vec<TorrentFile>>>,
+    config: config::Config,
+    mut logger: LogHandle,
+) -> Option<()> {
+    let mut lock = match torrents.lock() {
+        Ok(t) => t,
+        Err(_) => {
+            error!("Poisoned Mutex");
+            logger.error("Poisoned Mutex");
+            return None;
+        }
+    };
+    let mut connected = false;
+    for (i, torrent) in lock.iter_mut().enumerate() {
+        let info_hash = utils::hash_info(&torrent.metainfo.info.bencode());
+        let request = match handle_tracker(torrent, info_hash, &config, &logger) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let response = match torrent.response.as_mut() {
+            Some(r) => r,
+            None => continue,
+        };
+
+        if cfg!(feature = "server-demo") {
+            let peer = Peer {
+                peer_id: Some(request.peer_id),
+                ip: Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+                port: config.tcp_port(),
+            };
+            response.peers.push(peer);
+        }
+        HandlerDownload::new(
+            logger.clone(),
+            Arc::clone(&torrents),
+            i,
+            config.downloads(),
+            torrent.clone(),
+        );
+
+        connected |= true;
+    }
+
+    if !connected {
+        error!("Couldn't connect to any torrent");
+        logger.error("Couldn't connect to any torrent");
+        None
+    } else {
+        Some(()) // Could connect to at least one torrent
+    }
+}
+
+/// Spawns a thread that will serve as a intermediary between the
+/// client and the UI
+pub fn listener_ui(
+    torrents: Arc<Mutex<Vec<TorrentFile>>>,
+    render: Arc<Mutex<Render>>,
+    mut logger: LogHandle,
+) -> Option<JoinHandle<()>> {
+    let raw_data = get_info_wrapper(RequestMessage::MainView, &torrents, &mut logger)?;
+    send_data_to_view(
+        MessagesFromMain::MainViewMsg(MainViewRawData { raw_data }),
+        &render,
+        &mut logger,
+    )?;
+
+    let mut log_handle = logger.clone();
+    Some(thread::spawn(move || loop {
+        let msg = match render.lock() {
+            Ok(r) => match r.receive_main() {
+                Ok(m) => m,
+                Err(TryRecvError::Empty) => continue,
+                Err(TryRecvError::Disconnected) => break,
+            },
+            Err(_) => {
+                error!("Poisoned Mutex");
+                log_handle.error("Poisoned Mutex");
+                break;
+            }
+        };
+        handle_ui_msg(
+            msg,
+            Arc::clone(&torrents),
+            Arc::clone(&render),
+            log_handle.clone(),
+        );
+    }))
+}
+
+/// Gets the necessary information for the UI from the client
 pub fn get_info(torrents: &[TorrentFile], msg: RequestMessage) -> Vec<RawData> {
-    let mut vec = Vec::new();
     match msg {
-        RequestMessage::MainView => {
-            for t in torrents {
-                let Info(mode) = t.metainfo.info.clone();
-                let info = match mode {
-                    crate::torrent::info::InfoMode::Empty => todo!(),
-                    crate::torrent::info::InfoMode::SingleFile(it) => it,
-                };
-                let mut peers = Vec::new();
-                if let Some(res) = t.response.clone() {
-                    peers = res.peers.clone();
-                };
-                let data = RawData::Main {
-                    nombre: info.name,
-                    hash_de_verificación: utils::hash_info(&t.metainfo.info.bencode()).to_vec(),
-                    tamaño_total: info.length as u32,
-                    cantidad_de_piezas: (info.length / info.piece_length) as u32,
-                    cantidad_de_peers: peers.len() as u32,
-                    piezas_faltantes: t.bitfield.get_missing().len() as u32,
-                };
-                vec.push(data);
-            }
-            vec
-        }
-        RequestMessage::TorrentView => {
-            for t in torrents {
-                let Info(mode) = t.metainfo.info.clone();
-                let info = match mode {
-                    crate::torrent::info::InfoMode::Empty => todo!(),
-                    crate::torrent::info::InfoMode::SingleFile(it) => it,
-                };
-                let mut peers = Vec::new();
-                if let Some(res) = t.response.clone() {
-                    peers = res.peers.clone();
-                };
-                let data = RawData::Torrent {
-                    nombre: info.name.clone(),
-                    hash_de_verificación: utils::hash_info(&t.metainfo.info.bencode()).to_vec(),
-                    tamaño_total: info.length as u32,
-                    cantidad_de_piezas: (info.length / info.piece_length) as u32,
-                    cantidad_de_peers: peers.len() as u32,
-                    piezas_faltantes: t.bitfield.get_missing().len() as u32,
-                    cantidad_conexiones_activas: Some(0),
-                };
-                vec.push(data);
-            }
-            vec
-        }
-        RequestMessage::LiveView(id) => {
-            let t_clone = torrents.to_owned();
-            let torrent: Vec<&TorrentFile> = t_clone
-                .iter()
-                .filter(|&t| utils::get_info_from_torrentfile(t.metainfo.info.clone()).name == id.0)
-                .collect();
-            let t = torrent[0];
-            let Info(mode) = t.metainfo.info.clone();
-            let info = match mode {
-                crate::torrent::info::InfoMode::Empty => todo!(),
-                crate::torrent::info::InfoMode::SingleFile(it) => it,
-            };
-            let data = RawData::Live {
-                nombre: utils::get_info_from_torrentfile(t.metainfo.info.clone()).name,
-                peers_activos: t.peers_connected.clone(),
-                velocidad_subida: 0,
-                cantidad_de_descargadas: (info.length / info.piece_length) as u32
-                    - t.bitfield.get_missing().len() as u32,
-                tamanio_pieza: info.piece_length as u32,
-            };
-            vec.push(data);
-
-            vec
-        }
-        RequestMessage::Terminate => vec,
+        RequestMessage::MainView => main_view_msg(torrents),
+        RequestMessage::TorrentView => torrent_view_msg(torrents),
+        RequestMessage::LiveView(id) => live_view_msg(torrents, id),
+        RequestMessage::Terminate => Vec::new(),
     }
 }
-/// Returns the torrent files entered by the user.
-pub fn get_files<P: AsRef<Path>>(path: P) -> Vec<String> {
-    let dir = fs::read_dir(path).unwrap();
-    dir.into_iter()
-        .filter(|r| r.is_ok())
-        .map(|r| r.unwrap().path())
-        .filter(|p| p.extension() == Some(OsStr::new("torrent")))
-        .flat_map(|f| f.to_str().map(|s| s.to_string()))
-        .collect()
+
+/// Get information for the main view
+fn main_view_msg(torrents: &[TorrentFile]) -> Vec<RawData> {
+    let mut vec = Vec::new();
+    for t in torrents {
+        let info = t.metainfo.info().unwrap();
+        let mut peers = Vec::new();
+        if let Some(res) = t.response.clone() {
+            peers = res.peers.clone();
+        };
+        let data = RawData::Main {
+            name: info.name,
+            authentication_hash: utils::hash_info(&t.metainfo.info.bencode()).to_vec(),
+            total_size: info.length as u32,
+            number_of_pieces: (info.length / info.piece_length) as u32,
+            number_of_peers: peers.len() as u32,
+            remaining_pieces: t.bitfield.get_missing().len() as u32,
+        };
+        vec.push(data);
+    }
+    vec
+}
+/// Get information for the torrent view
+fn torrent_view_msg(torrents: &[TorrentFile]) -> Vec<RawData> {
+    let mut vec = Vec::new();
+    for t in torrents {
+        let info = t.metainfo.info().unwrap();
+        let mut peers = Vec::new();
+        if let Some(res) = t.response.clone() {
+            peers = res.peers.clone();
+        };
+        let data = RawData::Torrent {
+            name: info.name.clone(),
+            authentication_hash: utils::hash_info(&t.metainfo.info.bencode()).to_vec(),
+            total_size: info.length as u32,
+            number_of_pieces: (info.length / info.piece_length) as u32,
+            number_of_peers: peers.len() as u32,
+            remaining_pieces: t.bitfield.get_missing().len() as u32,
+            active_connections: t.peers_connected.len(),
+        };
+        vec.push(data);
+    }
+    vec
+}
+/// Get information for the live view
+fn live_view_msg(torrents: &[TorrentFile], id: TorrentId) -> Vec<RawData> {
+    let mut vec = Vec::new();
+    let t_clone = torrents.to_owned();
+    let torrent: Vec<&TorrentFile> = t_clone
+        .iter()
+        .filter(|&t| utils::get_info_from_torrentfile(t.metainfo.info.clone()).name == id.0)
+        .collect();
+    let t = torrent[0];
+    let info = t.metainfo.info().unwrap();
+    let data = RawData::Live {
+        name: utils::get_info_from_torrentfile(t.metainfo.info.clone()).name,
+        active_peers: t.peers_connected.clone(),
+        upload_speed: 0,
+        downloaded_files: (info.length / info.piece_length) as u32
+            - t.bitfield.get_missing().len() as u32,
+        piece_size: info.piece_length as u32,
+    };
+    vec.push(data);
+
+    vec
+}
+
+/// Returns the torrents in the folder specified in path. Returns
+/// `None` if the path doesn't correspond to a directory or if there
+/// isn't any torrent in the directory
+pub fn get_files<P: AsRef<Path>>(path: P) -> Option<Vec<String>> {
+    let dir = fs::read_dir(path).ok()?;
+    Some(
+        dir.into_iter()
+            .filter(|r| r.is_ok())
+            .map(|r| r.unwrap().path())
+            .filter(|p| p.extension() == Some(OsStr::new("torrent")))
+            .flat_map(|f| f.to_str().map(|s| s.to_string()))
+            .collect(),
+    )
+}
+
+/// Interaction with the tracker
+fn handle_tracker(
+    torrent: &mut TorrentFile,
+    info_hash: [u8; 20],
+    config: &config::Config,
+    logger: &LogHandle,
+) -> Option<TrackerRequest> {
+    let mut tracker_request = TrackerRequest::new(
+        info_hash,
+        torrent.metainfo.announce.clone(),
+        config.tcp_port(),
+    );
+
+    let handler = Handler::new(logger.clone(), &mut tracker_request);
+    handler
+        .tracker_response
+        .as_ref()
+        .and_then(|TrackerResponse(r)| match r {
+            Failure => None,
+            Response(response_data) => {
+                torrent.response = Some(response_data.clone());
+                Some(tracker_request)
+            }
+        })
+}
+
+/// Wrapper over get_info() that adds logging
+fn get_info_wrapper(
+    msg: RequestMessage,
+    torrents: &Arc<Mutex<Vec<TorrentFile>>>,
+    logger: &mut LogHandle,
+) -> Option<Vec<RawData>> {
+    Some(get_info(
+        &torrents
+            .lock()
+            .map_err(|e| {
+                error!("Poisoned Mutex");
+                logger.error("Poisoned Mutex");
+                e
+            })
+            .ok()?,
+        msg,
+    ))
+}
+
+/// Sends data from the client to the ui
+fn send_data_to_view(
+    msg: MessagesFromMain,
+    render: &Arc<Mutex<Render>>,
+    logger: &mut LogHandle,
+) -> Option<()> {
+    match render.lock() {
+        Ok(r) => r.send_main(msg).ok(),
+        Err(_) => {
+            error!("Poisoned Mutex");
+            logger.error("Poisoned Mutex");
+            None
+        }
+    }
+}
+
+/// Acts according to the message sent from the ui
+fn handle_ui_msg(
+    m: RequestMessage,
+    torrents: Arc<Mutex<Vec<TorrentFile>>>,
+    render: Arc<Mutex<Render>>,
+    mut logger: LogHandle,
+) -> Option<()> {
+    match m {
+        RequestMessage::MainView => {
+            let raw_data = get_info_wrapper(m, &torrents, &mut logger)?;
+            let msg = MessagesFromMain::MainViewMsg(MainViewRawData { raw_data });
+            send_data_to_view(msg, &render, &mut logger)
+        }
+
+        RequestMessage::TorrentView => {
+            let raw_data = get_info_wrapper(m, &torrents, &mut logger)?;
+            let msg = MessagesFromMain::TorrentViewMsg(TorrentViewRawData { raw_data });
+
+            send_data_to_view(msg, &render, &mut logger)
+        }
+        RequestMessage::LiveView(_) => {
+            let raw_data = get_info_wrapper(m, &torrents, &mut logger)?;
+            let msg = MessagesFromMain::LiveViewMsg(LiveViewRawData {
+                raw_data: raw_data[0].clone(),
+            });
+            send_data_to_view(msg, &render, &mut logger)
+        }
+        RequestMessage::Terminate => None,
+    }
 }
 
 // #[cfg(test)]

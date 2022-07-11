@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write};
+use std::{fs::File, io::Write, path::Path};
 
 use sha1::{Digest, Sha1};
 
@@ -29,12 +29,20 @@ pub struct Piece {
     pub hash: Vec<u8>,
     /// File name of the torrent file to be downloaded.
     pub file_name: String,
+    /// Directory where the torrent file will be downloaded.
+    pub directory: String,
 }
 
 impl Piece {
     /// Returns a pice of the file to be downloaded.
     /// Creates de Blocks of the piece.
-    pub fn new(length: i64, index: i64, hash: Vec<u8>, file_name: String) -> Self {
+    pub fn new(
+        length: i64,
+        index: i64,
+        hash: Vec<u8>,
+        file_name: String,
+        directory: String,
+    ) -> Self {
         let mut blocks: Vec<Block> = vec![];
         let num_blocks = ((length as f64) / (BLOCK_SIZE as f64)).ceil() as i64;
 
@@ -57,6 +65,7 @@ impl Piece {
             hash,
             blocks,
             file_name,
+            directory,
         }
     }
 
@@ -72,24 +81,25 @@ impl Piece {
 
     /// Validates that the data of the piece matches with its SHA1 hash.
     /// In that case, writes it in a file.
-    fn write_piece(&mut self, file: &mut File, piece_data: Vec<u8>) {
+    fn write_piece(&mut self, piece_data: Vec<u8>) {
         let mut hasher = Sha1::new();
         hasher.update(&piece_data);
         let result = hasher.finalize();
-        println!("Hash of the piece: {:x?}", result);
 
         if self.hash == result[..] {
+            let path = &(self.directory.to_owned()
+                + "piece"
+                + &self.index.to_string()
+                + "-"
+                + &self.file_name.clone());
+            let mut file = File::create(Path::new(path)).unwrap();
+
             file.write_all(&piece_data).unwrap();
         }
     }
 
     /// Writes a piece of the file to be downloaded in a file.
-    pub fn store(
-        &mut self,
-        file: &mut File,
-        block_index: u32,
-        data: Vec<u8>,
-    ) -> Result<(), PieceError> {
+    pub fn store(&mut self, block_index: u32, data: Vec<u8>) -> Result<(), PieceError> {
         let block = &mut self.blocks[block_index as usize];
         block.data = Some(data);
 
@@ -99,7 +109,7 @@ impl Piece {
             for block in self.blocks.iter() {
                 piece_data.extend(block.data.clone().unwrap());
             }
-            self.write_piece(file, piece_data);
+            self.write_piece(piece_data);
         }
         Ok(())
     }
@@ -108,5 +118,75 @@ impl Piece {
     pub fn add_block(&mut self, block_index: i64, data: Vec<u8>) {
         let block = &mut self.blocks[block_index as usize];
         block.data = Some(data);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn create_piece() {
+        let got = Piece::new(
+            0,
+            0,
+            [
+                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                0u8, 0u8, 0u8, 0u8,
+            ]
+            .to_vec(),
+            "test1.txt".to_string(),
+            "src".to_string(),
+        );
+
+        let want = Piece {
+            length: 0,
+            index: 0,
+            blocks: Vec::<Block>::new(),
+            hash: [
+                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                0u8, 0u8, 0u8, 0u8,
+            ]
+            .to_vec(),
+            file_name: "test1.txt".to_string(),
+            directory: "src".to_string(),
+        };
+
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn piece_with_empty_blocks() {
+        let got = Piece::new(
+            16384,
+            0,
+            [
+                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                0u8, 0u8, 0u8, 0u8,
+            ]
+            .to_vec(),
+            "test1.txt".to_string(),
+            "src".to_string(),
+        );
+
+        assert_eq!(got.have_all_blocks(), false);
+    }
+
+    #[test]
+    fn piece_with_completed_blocks() {
+        let mut got = Piece::new(
+            16384,
+            0,
+            [
+                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                0u8, 0u8, 0u8, 0u8,
+            ]
+            .to_vec(),
+            "test1.txt".to_string(),
+            "src".to_string(),
+        );
+
+        got.add_block(0, [1, 2, 3].to_vec());
+
+        assert_eq!(got.have_all_blocks(), true);
     }
 }

@@ -1,3 +1,5 @@
+use std::process::exit;
+
 use bittorrent::ui::app::run_app;
 
 use bittorrent::client::client_error::ClientError;
@@ -12,9 +14,19 @@ fn main() -> Result<(), ClientError> {
         .format_module_path(false)
         .init();
     info!("Starting client");
-    let (client, ui) = run_app().unwrap();
-    client.join().unwrap();
-    ui.join().unwrap();
+    match run_app() {
+        Some((client, ui)) => {
+            match client.join() {
+                Ok(_) => (),
+                Err(_) => exit(-1),
+            };
+            match ui.join() {
+                Ok(_) => (),
+                Err(_) => exit(-1),
+            };
+        }
+        None => exit(-1),
+    };
 
     Ok(())
 }

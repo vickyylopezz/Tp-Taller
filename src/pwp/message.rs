@@ -15,11 +15,13 @@ pub enum PWPMessage {
     Piece(u32, u32, Vec<u8>),
     Cancel(u32, u32, u32),
     Handshake(Vec<u8>, Vec<u8>),
-    Empty, // Port is needed?
 }
 
 impl PWPMessage {
     /// Creates a new message using the Peer Wire Protocol
+    /// Creates a new instance of [`PWPMessage`] from a `Vec<(BencodedValue,
+    /// BencodedValue)>`.  Returns [`Some`] if no errors occur while
+    /// building the instance; otherwise returns [`None`].
     pub fn new(msg_id: &u8, buf: &mut &[u8]) -> Option<PWPMessage> {
         let msg = match *msg_id {
             0 => PWPMessage::Choke,
@@ -53,8 +55,7 @@ impl PWPMessage {
             }
             b'K' => PWPMessage::KeepAlive,
 
-            //9 => PWPMessage::Port, //review parameters of the port in case is needed
-            _ => panic!("Bad message id: {}", msg_id), //manage the error in a better way
+            _ => return None,
         };
         Some(msg)
     }

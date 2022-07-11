@@ -2,7 +2,6 @@ use crate::tracker::request::querystring::Querystring;
 use crate::tracker::request::tracker_request_error::TrackerRequestError;
 use crate::tracker::request::tracker_request_event::TrackerRequestEvent;
 use crate::tracker::url_encoder::encoder::URLEncoded;
-use log::debug;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use std::fmt::Write;
@@ -108,7 +107,6 @@ impl TrackerRequest {
         if let Some(ip) = &self.ip {
             write!(querystring, "&ip={}", ip).map_err(|_| TrackerRequestError::WriteError)?;
         }
-        // write!(querystring, "&port={}", self.port).map_err(|_| TrackerRequestError::WriteError)?;
         write!(querystring, "&port={}", self.port).map_err(|_| TrackerRequestError::WriteError)?;
         write!(querystring, "&downloaded={}", self.downloaded)
             .map_err(|_| TrackerRequestError::WriteError)?;
@@ -126,7 +124,6 @@ impl TrackerRequest {
             }
         )
         .map_err(|_| TrackerRequestError::WriteError)?;
-        //write!(querystring, "&compact={}", self.compact).map_err(|_| TrackerRequestError::WriteError)?;
 
         Ok(Querystring(querystring))
     }

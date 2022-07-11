@@ -91,11 +91,22 @@ impl BitField {
         Some(())
     }
 
-    /// Returns a vector with de indexes of the missing pieces
+    /// Returns a vector with the indexes of the missing pieces
     pub fn get_missing(&self) -> Vec<usize> {
         let mut vec = Vec::new();
         for i in 0..self.pieces {
             if !self.has_piece(i) {
+                vec.push(i);
+            };
+        }
+        vec
+    }
+
+    /// Returns a vector with yhe indexes of the available pieces
+    pub fn get_available(&self) -> Vec<usize> {
+        let mut vec = Vec::new();
+        for i in 0..self.pieces {
+            if self.has_piece(i) {
                 vec.push(i);
             };
         }
@@ -133,13 +144,13 @@ mod tests {
         assert_eq!(got, want);
     }
 
-    // #[test]
-    // fn ask_for_the_fifteenth_piece_when_there_is_only_fourteen() {
-    //     let bitfield = BitField::new_from_vec(vec![255, 252], 14);
-    //     let got = bitfield.has_piece(15);
-    //     let want = None;
-    //     assert_eq!(got, want);
-    // }
+    #[test]
+    fn ask_for_the_fifteenth_piece_when_there_is_only_fourteen() {
+        let bitfield = BitField::new_from_vec(vec![255, 252], 14);
+        let got = bitfield.has_piece(15);
+        let want = false;
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn mark_the_twentieth_piece_as_downloaded() {
@@ -153,17 +164,17 @@ mod tests {
         assert_eq!(got, want);
     }
 
-    // #[test]
-    // fn trying_to_mark_pieces_that_are_not_present_returns_none() {
-    //     let mut bitfield = BitField::new(27).unwrap();
-    //     let previous = bitfield.has_piece(28);
-    //     bitfield.set_piece(28);
-    //     let got = bitfield.has_piece(28);
-    //     let want = None;
+    #[test]
+    fn trying_to_mark_pieces_that_are_not_present_returns_none() {
+        let mut bitfield = BitField::new(27).unwrap();
+        let previous = bitfield.has_piece(28);
+        bitfield.set_piece(28);
+        let got = bitfield.has_piece(28);
+        let want = false;
 
-    //     assert_eq!(previous, None);
-    //     assert_eq!(got, want);
-    // }
+        assert_eq!(previous, false);
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn create_a_bitfield_with_zero_pieces() {

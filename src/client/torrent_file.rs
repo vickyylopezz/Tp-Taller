@@ -2,13 +2,13 @@ use std::fs::File;
 
 use crate::client::bitfield::BitField;
 use crate::client::torrent_file_error::TorrentFileError;
-use crate::peer_info::PeerInfo;
+use crate::peer::peer_handler::Peer;
 use crate::torrent::info::Info;
 use crate::torrent::metainfo::{self, Metainfo};
 use crate::tracker::response::tracker_response::ResponseData;
 use crate::utils;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 /// Represents a torrent file.
 pub struct TorrentFile {
     /// Name of the file to be downloaded.
@@ -21,7 +21,8 @@ pub struct TorrentFile {
     pub response: Option<ResponseData>,
     /// Amount of active connections as listener. Tiene que ser un Arc<Mutex>
     pub count_connections: i32,
-    pub peers_connected: Vec<PeerInfo>,
+    pub peers_connected: Vec<Peer>,
+    pub pieces_ammount: usize,
 }
 
 impl TorrentFile {
@@ -45,6 +46,7 @@ impl TorrentFile {
             response: None,
             count_connections: 0,
             peers_connected: Vec::new(),
+            pieces_ammount: info.length as usize / info.piece_length as usize,
         })
     }
 
@@ -75,6 +77,7 @@ mod tests {
             response: None,
             count_connections: 0,
             peers_connected: Vec::new(),
+            pieces_ammount: info.length as usize / info.piece_length as usize,
         };
 
         assert_eq!(got, want);

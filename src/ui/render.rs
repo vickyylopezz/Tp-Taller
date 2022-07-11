@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, SendError, TryRecvError};
 use std::thread;
 use std::time::Instant;
 
-use crate::peer_info::PeerInfo;
+use crate::peer::peer_handler::Peer;
 use crate::utils;
 
 //Todo estos tipos de dato que terminan en info van a ser un vector de tuplas.
@@ -56,28 +56,28 @@ pub enum MessagesFromMain {
 #[derive(Debug, Clone)]
 pub enum RawData {
     Main {
-        nombre: String,
-        hash_de_verificación: Vec<u8>,
-        tamaño_total: u32,
-        cantidad_de_piezas: u32,
-        cantidad_de_peers: u32,
-        piezas_faltantes: u32,
+        name: String,
+        authentication_hash: Vec<u8>,
+        total_size: u32,
+        number_of_pieces: u32,
+        number_of_peers: u32,
+        remaining_pieces: u32,
     },
     Torrent {
-        nombre: String,
-        hash_de_verificación: Vec<u8>,
-        tamaño_total: u32,
-        cantidad_de_piezas: u32,
-        cantidad_de_peers: u32,
-        piezas_faltantes: u32,
-        cantidad_conexiones_activas: Option<u32>,
+        name: String,
+        authentication_hash: Vec<u8>,
+        total_size: u32,
+        number_of_pieces: u32,
+        number_of_peers: u32,
+        remaining_pieces: u32,
+        active_connections: usize,
     },
     Live {
-        nombre: String,
-        peers_activos: Vec<PeerInfo>,
-        velocidad_subida: u32,
-        cantidad_de_descargadas: u32,
-        tamanio_pieza: u32,
+        name: String,
+        active_peers: Vec<Peer>,
+        upload_speed: u32,
+        downloaded_files: u32,
+        piece_size: u32,
     },
 }
 
@@ -160,15 +160,27 @@ impl Render {
 
             if let Ok(info_from_main) = info_from_main {
                 match info_from_main {
-                    MessagesFromMain::MainViewMsg(it) => tx_ui_aux
-                        .send(MessagesToUI::MainViewMsg(data_to_maininfo(it)))
-                        .unwrap(),
-                    MessagesFromMain::TorrentViewMsg(it) => tx_ui_aux
-                        .send(MessagesToUI::TorrentViewMsg(data_to_torrentinfo(it)))
-                        .unwrap(),
-                    MessagesFromMain::LiveViewMsg(it) => tx_ui_aux
-                        .send(MessagesToUI::LiveViewMsg(data_to_liveinfo(it, now)))
-                        .unwrap(),
+                    MessagesFromMain::MainViewMsg(it) => match data_to_maininfo(it) {
+                        Ok(data) => match tx_ui_aux.send(MessagesToUI::MainViewMsg(data)) {
+                            Ok(_) => (),
+                            Err(_) => continue,
+                        },
+                        Err(_) => continue,
+                    },
+                    MessagesFromMain::TorrentViewMsg(it) => match data_to_torrentinfo(it) {
+                        Ok(data) => match tx_ui_aux.send(MessagesToUI::TorrentViewMsg(data)) {
+                            Ok(_) => (),
+                            Err(_) => continue,
+                        },
+                        Err(_) => continue,
+                    },
+                    MessagesFromMain::LiveViewMsg(it) => match data_to_liveinfo(it, now) {
+                        Ok(data) => match tx_ui_aux.send(MessagesToUI::LiveViewMsg(data)) {
+                            Ok(_) => (),
+                            Err(_) => continue,
+                        },
+                        Err(_) => continue,
+                    },
                     MessagesFromMain::Terminate => stop_condition.0 = true,
                 }
             }
@@ -176,12 +188,21 @@ impl Render {
             let msg_from_ui = rx_ui.try_recv();
             if let Ok(msg_from_ui) = msg_from_ui {
                 match msg_from_ui {
-                    RequestMessage::MainView => tx_main_aux.send(RequestMessage::MainView).unwrap(),
+                    RequestMessage::MainView => match tx_main_aux.send(RequestMessage::MainView) {
+                        Ok(_) => (),
+                        Err(_) => continue,
+                    },
                     RequestMessage::TorrentView => {
-                        tx_main_aux.send(RequestMessage::TorrentView).unwrap()
+                        match tx_main_aux.send(RequestMessage::TorrentView) {
+                            Ok(_) => (),
+                            Err(_) => continue,
+                        }
                     }
                     RequestMessage::LiveView(it) => {
-                        tx_main_aux.send(RequestMessage::LiveView(it)).unwrap()
+                        match tx_main_aux.send(RequestMessage::LiveView(it)) {
+                            Ok(_) => (),
+                            Err(_) => continue,
+                        }
                     }
                     RequestMessage::Terminate => stop_condition.1 = true,
                 }
@@ -219,18 +240,18 @@ impl Render {
 }
 
 //parsea data a info
-fn data_to_maininfo(data: MainViewRawData) -> MainViewInfo {
+fn data_to_maininfo(data: MainViewRawData) -> Result<MainViewInfo, Box<dyn std::error::Error>> {
     let mut cards = Vec::new();
     for r in data.raw_data {
         let mut title = String::new();
         let mut info = String::new();
         if let RawData::Main {
-            nombre,
-            hash_de_verificación,
-            tamaño_total,
-            cantidad_de_piezas,
-            cantidad_de_peers,
-            piezas_faltantes,
+            name: nombre,
+            authentication_hash: hash_de_verificación,
+            total_size: tamaño_total,
+            number_of_pieces: cantidad_de_piezas,
+            number_of_peers: cantidad_de_peers,
+            remaining_pieces: piezas_faltantes,
         } = r
         {
             title.push_str(&nombre);
@@ -238,38 +259,40 @@ fn data_to_maininfo(data: MainViewRawData) -> MainViewInfo {
             for h in hash_de_verificación {
                 hash.push_str(&format!("{:x}", h));
             }
-            write!(info, "Hash de verificacion: {}\n\n", hash).unwrap();
-            write!(info, "Tamaño total: {} MB\n\n", tamaño_total / 1000000).unwrap();
-            write!(info, "Cantidad de Piezas: {}\n\n", cantidad_de_piezas).unwrap();
-            write!(info, "Cantidad de Peers: {}\n\n", cantidad_de_peers).unwrap();
+            write!(info, "Hash de verificacion: {}\n\n", hash)?;
+            write!(info, "Tamaño total: {} MB\n\n", tamaño_total / 1000000)?;
+            write!(info, "Cantidad de Piezas: {}\n\n", cantidad_de_piezas)?;
+            write!(info, "Cantidad de Peers: {}\n\n", cantidad_de_peers)?;
             if piezas_faltantes == 0 {
-                write!(info, "Estado: Almacenado\n\n").unwrap();
+                write!(info, "Estado: Almacenado\n\n")?;
             } else if piezas_faltantes == cantidad_de_piezas {
-                write!(info, "Estado: Por descargar\n\n").unwrap();
+                write!(info, "Estado: Por descargar\n\n")?;
             } else {
-                write!(info, "Estado: Descargando\n\n").unwrap();
+                write!(info, "Estado: Descargando\n\n")?;
             }
             let card = Card { title, info };
             cards.push(card);
         };
     }
 
-    MainViewInfo { cards }
+    Ok(MainViewInfo { cards })
 }
 
-fn data_to_torrentinfo(data: TorrentViewRawData) -> TorrentViewInfo {
+fn data_to_torrentinfo(
+    data: TorrentViewRawData,
+) -> Result<TorrentViewInfo, Box<dyn std::error::Error>> {
     let mut cards = Vec::new();
     for r in data.raw_data {
         let mut title = String::new();
         let mut info = String::new();
         if let RawData::Torrent {
-            nombre,
-            hash_de_verificación,
-            tamaño_total,
-            cantidad_de_piezas,
-            cantidad_de_peers,
-            piezas_faltantes,
-            cantidad_conexiones_activas,
+            name: nombre,
+            authentication_hash: hash_de_verificación,
+            total_size: tamaño_total,
+            number_of_pieces: cantidad_de_piezas,
+            number_of_peers: cantidad_de_peers,
+            remaining_pieces: piezas_faltantes,
+            active_connections: cantidad_conexiones_activas,
         } = r
         {
             title.push_str(&nombre);
@@ -277,48 +300,49 @@ fn data_to_torrentinfo(data: TorrentViewRawData) -> TorrentViewInfo {
             for h in hash_de_verificación {
                 hash.push_str(&format!("{:x}", h));
             }
-            write!(info, "Hash de verificacion: {}\n\n", hash).unwrap();
-            write!(info, "Tamaño total: {} MB\n\n", tamaño_total / 1000000).unwrap();
+            write!(info, "Hash de verificacion: {}\n\n", hash)?;
+            write!(info, "Tamaño total: {} MB\n\n", tamaño_total / 1000000)?;
 
-            write!(info, "Cantidad de Piezas: {}\n\n", cantidad_de_piezas).unwrap();
-            write!(info, "Cantidad de Peers: {}\n\n", cantidad_de_peers).unwrap();
+            write!(info, "Cantidad de Piezas: {}\n\n", cantidad_de_piezas)?;
+            write!(info, "Cantidad de Peers: {}\n\n", cantidad_de_peers)?;
             if piezas_faltantes == 0 {
-                write!(info, "Estado: Almacenado\n\n").unwrap();
+                write!(info, "Estado: Almacenado\n\n")?;
             } else if piezas_faltantes == cantidad_de_piezas {
-                write!(info, "Estado: Por descargar\n\n").unwrap();
+                write!(info, "Estado: Por descargar\n\n")?;
             } else {
-                write!(info, "Estado: Descargando\n\n").unwrap();
+                write!(info, "Estado: Descargando\n\n")?;
             }
-            write!(info, "Estructura del Torrent: Single File\n\n").unwrap();
+            write!(info, "Estructura del Torrent: Single File\n\n")?;
             let piezas_descargadas = cantidad_de_piezas - piezas_faltantes;
             let porcentaje = (piezas_descargadas * 100) as f64 / cantidad_de_piezas as f64;
             write!(
                 info,
                 "Porcentaje de completitud: {}%\n\n",
                 utils::round_float(porcentaje, 2)
-            )
-            .unwrap();
+            )?;
             write!(
                 info,
                 "Cantidad de piezas descargadas: {}\n\n",
                 piezas_descargadas
-            )
-            .unwrap();
-            if let Some(conexiones) = cantidad_conexiones_activas {
-                write!(info, "Cantidad de conexiones activas: {}\n\n", conexiones).unwrap();
-            } else {
-                write!(info, "Cantidad de conexiones activas: 0\n\n").unwrap();
-            };
+            )?;
+            write!(
+                info,
+                "Cantidad de conexiones activas: {}\n\n",
+                cantidad_conexiones_activas
+            )?;
 
             let card = Card { title, info };
             cards.push(card);
         };
     }
 
-    TorrentViewInfo { cards }
+    Ok(TorrentViewInfo { cards })
 }
 
-fn data_to_liveinfo(data: LiveViewRawData, start: Instant) -> LiveViewInfo {
+fn data_to_liveinfo(
+    data: LiveViewRawData,
+    start: Instant,
+) -> Result<LiveViewInfo, Box<dyn std::error::Error>> {
     let mut card = Card {
         title: String::new(),
         info: String::new(),
@@ -326,11 +350,11 @@ fn data_to_liveinfo(data: LiveViewRawData, start: Instant) -> LiveViewInfo {
     let mut title = String::new();
     let mut info = String::new();
     if let RawData::Live {
-        nombre,
-        mut peers_activos,
-        velocidad_subida,
-        cantidad_de_descargadas,
-        tamanio_pieza,
+        name: nombre,
+        active_peers: mut peers_activos,
+        upload_speed: _velocidad_subida,
+        downloaded_files: cantidad_de_descargadas,
+        piece_size: tamanio_pieza,
     } = data.raw_data
     {
         let now = Instant::now();
@@ -343,33 +367,38 @@ fn data_to_liveinfo(data: LiveViewRawData, start: Instant) -> LiveViewInfo {
             info,
             "Velocidad de bajada: {} MB/s\n\n",
             utils::round_float(velocidad_bajada, 2)
-        )
-        .unwrap();
-        write!(info, "Velocidad de subida: {} MB/s\n\n", velocidad_subida).unwrap();
-        write!(info, "Estado del cliente: Interested\n\n").unwrap(); //REVISAR CUANDO TENGAMOS LOS ESTADOS
+        )?;
+        // write!(
+        //     info,
+        //     "Velocidad de subida: {} MB/s\n\n",
+        //     utils::round_float(velocidad_bajada * 1.07, 2)
+        // )?;
+        write!(info, "Estado del cliente: Interested\n\n")?;
 
         for p in peers_activos {
             info.push_str("\n\n----- Peer Info -----\n\n");
             let mut id = String::new();
-            for i in p.peer_id.clone() {
-                id.push(i as char);
+            if let Some(peer_id) = p.peer_id {
+                for i in peer_id {
+                    id.push(i as char);
+                }
             }
-            write!(info, "Peer id: {}\n\n", id).unwrap();
-            write!(info, "Ip: {}\n\n", p.ip.unwrap()).unwrap();
-            write!(info, "Port: {}\n\n", p.port).unwrap();
-            // match p.connection_status().1 {
-            //     crate::connection::ChokeStatus::Choked => write!(info, "Estado: Choked\n\n").unwrap(),
-            //     crate::connection::ChokeStatus::Unchoked => write!(info, "Estado: Unchoked\n\n").unwrap(),
-            // }
+
+            write!(info, "Peer id: {}\n\n", id)?;
+            if let Some(ip) = p.ip {
+                write!(info, "Ip: {}\n\n", ip)?;
+            }
+            write!(info, "Port: {}\n\n", p.port)?;
         }
         card = Card { title, info };
     };
-    LiveViewInfo { card }
+    Ok(LiveViewInfo { card })
 }
 
 impl Drop for Render {
     fn drop(&mut self) {}
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,12 +408,12 @@ mod tests {
         render
             .send_main(MessagesFromMain::MainViewMsg(MainViewRawData {
                 raw_data: vec![RawData::Main {
-                    nombre: "hola".to_string(),
-                    hash_de_verificación: vec![0, 0, 0],
-                    tamaño_total: 21,
-                    cantidad_de_piezas: 10,
-                    cantidad_de_peers: 3,
-                    piezas_faltantes: 3,
+                    name: "hola".to_string(),
+                    authentication_hash: vec![0, 0, 0],
+                    total_size: 21,
+                    number_of_pieces: 10,
+                    number_of_peers: 3,
+                    remaining_pieces: 3,
                 }],
             }))
             .unwrap();

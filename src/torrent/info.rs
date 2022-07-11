@@ -79,6 +79,13 @@ impl Info {
             InfoMode::SingleFile(ref s) => bencode_single_file(s),
         }
     }
+
+    pub fn info(&self) -> Option<SingleFileData> {
+        match &self.0 {
+            InfoMode::Empty => None,
+            InfoMode::SingleFile(s) => Some(s.clone()),
+        }
+    }
 }
 
 /// Helper function for bencoding the [`Info`] struct when the mode is
@@ -153,7 +160,6 @@ fn build_info_fields<'a>(
     Some(())
 }
 
-// TODO: Test extra field and wrong value type
 #[cfg(test)]
 mod tests {
     use super::*;

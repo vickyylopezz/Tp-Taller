@@ -5,17 +5,11 @@ use super::response::tracker_response_error::TrackerResponseError;
 use super::tracker_handler_error::TrackerHandlerError;
 use crate::bencode::parser;
 use crate::log::logger;
-use crate::threadpool;
 
 use log::{error, info};
 use native_tls::TlsConnector;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-
-use std::sync::mpsc;
-use std::sync::mpsc::RecvError;
-use std::sync::mpsc::SendError;
-use std::{str, thread};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum HandlerMessage {
@@ -34,92 +28,48 @@ pub enum HandlerClientMessage {
 
 #[derive(Debug)]
 pub struct Handler {
-    pub request_handler: Option<thread::JoinHandle<()>>,
-    request_queue: mpsc::Sender<HandlerMessage>, // Cliente -> Handler
-    response_receiver: mpsc::Receiver<HandlerClientMessage>, // Handler -> Cliente
+    // pub request_handler: Option<thread::JoinHandle<()>>,
+    // request_queue: mpsc::Sender<HandlerMessage>, // Cliente -> Handler
+    // response_receiver: mpsc::Receiver<HandlerClientMessage>, // Handler -> Cliente
+    pub tracker_response: Option<TrackerResponse>,
 }
 
 impl Handler {
-    pub fn new(mut logger: logger::LogHandle) -> Self {
-        let (request_queue, rx) = mpsc::channel();
-        let (tx, response_receiver) = mpsc::channel();
-        let request_channel = tx;
+    pub fn new(logger: logger::LogHandle, tracker_request: &mut TrackerRequest) -> Self {
+        let mut handle = logger;
 
-        let request_handler = Some(thread::spawn(move || {
-            let mut pool = threadpool::ThreadPool::new(2, logger.clone()).unwrap();
-            loop {
-                let request = rx.recv().unwrap();
-                let tx = request_channel.clone();
-                let mut handle = logger.clone();
-                match request {
-                    HandlerMessage::RequestMessage(mut req) => pool
-                        .spawn(move || {
-                            match make_request(&mut req) {
-                                // Log in console
-                                Ok(s) => {
-                                    tx.send(HandlerClientMessage::Sent).unwrap();
-                                    info!("Tracker request sent");
-                                    handle.info("Tracker request sent");
-                                    match receive_response(s) {
-                                        Ok(response) => match parse_response(response, req.peer_id)
-                                        {
-                                            Ok(r) => {
-                                                info!("Response received");
-                                                handle.info("Response received");
-                                                tx.send(HandlerClientMessage::ResponseMessage(r))
-                                                    .unwrap()
-                                            }
-                                            Err(e) => {
-                                                error!("{}", e);
-                                                handle.error(&format!("{}", e));
-                                                tx.send(HandlerClientMessage::ResponseError(e))
-                                                    .unwrap()
-                                            }
-                                        },
-                                        Err(e) => {
-                                            error!("{}", e);
-                                            handle.error(&format!("{}", e));
-                                            tx.send(HandlerClientMessage::ResponseError(e)).unwrap()
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("{}", e);
-                                    handle.error(&format!("{}", e));
-                                    tx.send(HandlerClientMessage::RequestError(e)).unwrap()
-                                }
-                            };
-                        })
-                        .unwrap(),
-                    HandlerMessage::Terminate => break,
-                };
+        let response = match make_request(tracker_request) {
+            Ok(s) => {
+                info!("Tracker request sent");
+                handle.info("Tracker request sent");
+                match receive_response(s) {
+                    Ok(response) => match parse_response(response, tracker_request.peer_id) {
+                        Ok(r) => {
+                            info!("Response received");
+                            handle.info("Response received");
+                            Some(r)
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                            handle.error(&format!("{}", e));
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        error!("{}", e);
+                        handle.error(&format!("{}", e));
+                        None
+                    }
+                }
             }
-
-            pool.join().unwrap();
-        }));
-
+            Err(e) => {
+                error!("{}", e);
+                handle.error(&format!("{}", e));
+                None
+            }
+        };
         Handler {
-            request_handler,
-            request_queue,
-            response_receiver,
-        }
-    }
-
-    pub fn receive(&self) -> Result<HandlerClientMessage, RecvError> {
-        self.response_receiver.recv()
-    }
-
-    pub fn send(&self, msg: HandlerMessage) -> Result<(), SendError<HandlerMessage>> {
-        self.request_queue.send(msg)
-    }
-}
-
-impl Drop for Handler {
-    fn drop(&mut self) {
-        self.request_queue.send(HandlerMessage::Terminate).unwrap();
-
-        if let Some(thread) = self.request_handler.take() {
-            thread.join().unwrap();
+            tracker_response: response,
         }
     }
 }

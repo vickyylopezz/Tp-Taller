@@ -26,11 +26,10 @@ impl PWPStream {
             Some(it) => it,
             None => return Err(ProtocolError::Connection),
         };
-        //let socket = format!("{}:{}", ip, peer.port);
         let socket = SocketAddr::new(ip, peer.port);
-        //println!("{}", socket);
+        // println!("{}", socket);
         let mut stream = TcpStream::connect(socket).map_err(|_| ProtocolError::Connection)?;
-        //println!("{:?}", stream);
+        // println!("{:?}", stream);
         let peer_id = peer.peer_id.ok_or(ProtocolError::MissingPeerID)?;
         let msg = handshake_msg(info_hash, &peer_id[..]);
         //let mut stream = stream;
@@ -38,12 +37,16 @@ impl PWPStream {
             .write_all(&msg)
             .map_err(|_| ProtocolError::Handshake)?;
 
-        //println!("Handshake sent");
+        // println!("Handshake sent");
 
         Ok(PWPStream(stream))
     }
 
     /// msg format <length prefix><message ID><payload>
+    ///
+    /// We have decided to keep the fully match arm without any modularization because it's much
+    /// less complex to understand what is going on with each message.
+    ///
     pub fn send(&mut self, msg: PWPMessage) -> Result<(), PWPError> {
         let bytes = match msg {
             PWPMessage::KeepAlive => 0u32.to_be_bytes().into(),
@@ -105,8 +108,7 @@ impl PWPStream {
                 b.append(&mut length.to_be_bytes().into());
                 b
             }
-            PWPMessage::Handshake(_, _) => todo!(),
-            PWPMessage::Empty => todo!(),
+            PWPMessage::Handshake(info_hash, peer_id) => handshake_msg(info_hash, &peer_id),
         };
         self.0
             .write_all(&bytes)
@@ -136,10 +138,10 @@ impl PWPStream {
         if array[3] == 0 {
             return PWPMessage::new(&b'K', &mut &array[..]).ok_or(PWPError::MappingError);
         }
-        let msg_len = from_u32_be(&mut &array[..]).ok_or(PWPError::WrongSizeRead)?;
+        let msg_len = utils::from_u32_be(&mut &array[..]).ok_or(PWPError::WrongSizeRead)?;
 
         if msg_len > 0 {
-            let msg = self.read_bytes(msg_len).unwrap();
+            let msg = self.read_bytes(msg_len)?;
             PWPMessage::new(&msg[0], &mut &msg[1..]).ok_or(PWPError::MappingError)
         } else {
             PWPMessage::new(&b'K', &mut &array[..]).ok_or(PWPError::MappingError)
@@ -168,13 +170,6 @@ fn handshake_msg(info_hash: Vec<u8>, peer_id: &[u8]) -> Vec<u8> {
     let mut reserved = vec![0u8; 8];
     let mut hash = info_hash;
     utils::append!(pstrlen, pstr, reserved, hash, peer_id.to_vec())
-}
-
-// TODO: Move to utils
-fn from_u32_be(array: &mut &[u8]) -> Option<u32> {
-    let (int_bytes, rest) = array.split_at(std::mem::size_of::<u32>());
-    *array = rest;
-    Some(u32::from_be_bytes(int_bytes.try_into().ok()?))
 }
 
 #[cfg(test)]

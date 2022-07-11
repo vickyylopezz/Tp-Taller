@@ -1,5 +1,6 @@
 use crate::client::client_handler::Client;
 use crate::config;
+use crate::log::logger::Logger;
 
 use super::render::{Card, Render};
 use super::utils;
@@ -9,22 +10,18 @@ use super::views::torrent_view::TorrentView;
 use gtk::{prelude::*, Box};
 use gtk::{Application, ApplicationWindow, Button};
 use gtk::{CssProvider, Orientation};
-use log::debug;
 use std::cell::RefCell;
+use std::fs;
+use std::path::Path;
 use std::process::exit;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::{env, fs};
 
 #[derive(Clone)]
 pub struct LeftPaneElements {
     pub main_bt: Button,
     pub torrent_bt: Button,
-    //pub live_bt: Button,
-    // pub refresh_bt: Button,
-    // pub refresh_date: Box,
-    // pub refresh_box: Box,
 }
 
 pub enum Panes {
@@ -67,7 +64,14 @@ fn init_window() -> Option<(JoinHandle<()>, JoinHandle<()>)> {
         Client::new(Arc::clone(&render), &config).unwrap(),
     ));
 
-    let threads = match Client::run(client.borrow_mut().torrents.clone(), render, config) {
+    let log_file = fs::File::create(Path::new(&format!("{}run.log", config.logs()))).ok()?;
+    let logger = Logger::new(log_file);
+    let threads = match Client::run(
+        client.borrow_mut().torrents.clone(),
+        render,
+        config,
+        &logger,
+    ) {
         Ok(it) => Some(it),
         Err(_) => return None,
     };

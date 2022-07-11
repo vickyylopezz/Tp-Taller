@@ -22,3 +22,36 @@ impl Block {
         self.data = Some(data);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn create_block_without_data() {
+        let got = Block::new(0, 0, 0);
+
+        let want = Block {
+            index: 0,
+            piece_index: 0,
+            length: 0,
+            data: None,
+        };
+
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn create_block_with_data() {
+        let mut got = Block::new(0, 0, 0);
+        got.add_data([1, 2, 3].to_vec());
+
+        let want = Block {
+            index: 0,
+            piece_index: 0,
+            length: 0,
+            data: Some([1, 2, 3].to_vec()),
+        };
+
+        assert_eq!(got, want);
+    }
+}

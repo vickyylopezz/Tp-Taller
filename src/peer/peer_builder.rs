@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::peer::peer_handler::Peer;
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 /// Represents a constructor of a Peer.
 pub struct PeerBuilder {
@@ -51,8 +52,6 @@ impl PeerBuilder {
                 Err(_) => None,
             };
         }
-
-        //self.ip = String::from_utf8_lossy(&ip).to_string();
         self
     }
 
@@ -69,5 +68,30 @@ impl PeerBuilder {
             ip: self.ip,
             port: self.port,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+    #[test]
+    fn create_a_peer_with_ip_and_port_and_id() {
+        let mut builder = PeerBuilder::new();
+        builder.ip([127, 0, 0, 1].to_vec());
+        builder.port(5419);
+        builder.peer_id([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8,
+        ]);
+        let got = builder.build();
+        let want = Peer {
+            peer_id: Some([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            ip: Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            port: 5419,
+        };
+
+        assert_eq!(got, want)
     }
 }

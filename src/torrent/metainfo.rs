@@ -1,4 +1,4 @@
-use super::info::{self, Info};
+use super::info::{self, Info, SingleFileData};
 use super::metainfo_builder::MetainfoBuilder;
 use super::torrent_error::TorrentError;
 use crate::bencode::{bencoded_value::BencodedValue, parser};
@@ -56,6 +56,10 @@ impl Metainfo {
                 Some(metainfo.build())
             })
             .flatten()
+    }
+
+    pub fn info(&self) -> Option<SingleFileData> {
+        self.info.info()
     }
 }
 

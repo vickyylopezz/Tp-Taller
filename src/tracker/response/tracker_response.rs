@@ -111,9 +111,6 @@ fn build_response_fields(
                         break;
                     }
 
-                    // |a|b|c|d|e|f|
-                    // ip --> |a|b|c|d|
-                    // port --> |e|f|
                     let ip = &b[i..i + 4];
                     let port = &b[i + 4..i + 6];
 
@@ -137,30 +134,37 @@ fn build_response_fields(
 #[cfg(test)]
 mod tests {
 
+    use std::net::{IpAddr, Ipv4Addr};
+
     use super::*;
     use crate::bencode::parser;
 
-    // #[test]
-    // fn normal_response_with_dictionary_mode() {
-    //     let response = "d8:intervali1800e8:completei1900e10:incompletei1700e5:peersld2:ip13:192.168.189.14:porti20111eeee".into();
-    //     let bencoded_dictionary = parser::parse(response).unwrap();
-    //     let tracker_response = TrackerResponse::new(bencoded_dictionary).unwrap();
+    #[test]
+    fn normal_response_with_dictionary_mode() {
+        let response = "d8:intervali1800e8:completei1900e10:incompletei1700e5:peersld2:ip13:192.168.189.14:porti20111eeee".into();
+        let bencoded_dictionary = parser::parse(response).unwrap();
+        let tracker_response = TrackerResponse::new(
+            bencoded_dictionary,
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .unwrap();
 
-    //     // let mut vec_peers = Vec::new();
-    //     // let peer = Peer {
-    //     //     peer_id: None,
-    //     //     ip: "192.168.189.1".parse().unwrap(),
-    //     //     port: 20111,
-    //     // };
-    //     // vec_peers.push(peer);
-    //     // let response = TrackerResponse(TrackerResponseMode::Response(ResponseData {
-    //     //     interval: 1800,
-    //     //     complete: 1900,
-    //     //     incomplete: 1700,
-    //     //     peers: vec_peers,
-    //     // }));
-    //     // assert_eq!(tracker_response, response);
-    // }
+        let mut vec_peers = Vec::new();
+        let peer = Peer {
+            peer_id: Some([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            ip: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 189, 1))),
+            port: 20111,
+        };
+        vec_peers.push(peer);
+        let response = TrackerResponse(TrackerResponseMode::Response(ResponseData {
+            interval: 1800,
+            complete: 1900,
+            incomplete: 1700,
+            peers: vec_peers,
+            min_interval: None,
+        }));
+        assert_eq!(tracker_response, response);
+    }
 
     #[test]
     fn response_with_few_keys() {
