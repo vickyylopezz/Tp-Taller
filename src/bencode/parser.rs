@@ -46,8 +46,8 @@ impl Parser {
             .collect::<String>()
             .parse()
             .map_err(|_| ParserError::InvalidByteStringLength)?;
-
         let byte_string = self.take(length).collect::<Vec<u8>>();
+
         Ok(BencodedValue::ByteString(byte_string))
     }
     /// Parses the string if it's a valid bencoded dictionary and
@@ -223,7 +223,8 @@ impl Parser {
                 b'1'..=b'9' => self.byte_string(),
                 b'l' => self.list(),
                 b'd' => self.dictionary(),
-                _ => Err(ParserError::InvalidEncoding(self.cursor, "invalid bencode")),
+                _ => {
+                    Err(ParserError::InvalidEncoding(self.cursor, "invalid bencode"))},
             })
             .map_or_else(|| Err(ParserError::Empty), |r| r)
     }

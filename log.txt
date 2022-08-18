@@ -1,4 +1,0 @@
-ERROR: Poisoned Mutex
-ERROR: Poisoned Mutex
-ERROR: Poisoned Mutex
-ERROR: Poisoned Mutex

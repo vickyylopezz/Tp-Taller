@@ -5,6 +5,8 @@ use bittorrent::ui::app::run_app;
 use bittorrent::client::client_error::ClientError;
 #[macro_use]
 extern crate log;
+extern crate rand;
+
 use env_logger::Builder;
 use log::LevelFilter;
 

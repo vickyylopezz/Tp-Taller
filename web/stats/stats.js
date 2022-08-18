@@ -1,0 +1,1 @@
+console.log("Entre stats js");

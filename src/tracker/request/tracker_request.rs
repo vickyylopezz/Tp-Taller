@@ -87,8 +87,8 @@ impl TrackerRequest {
         querystring.push_str("info_hash=");
 
         let mut url;
-
-        querystring.push_str(match URLEncoded::new().urlencode(&self.info_hash) {
+        println!("{:?}", self.info_hash);
+        querystring.push_str(match URLEncoded::encode(&self.info_hash) {
             Ok(it) => {
                 url = it.get_url();
                 &url
@@ -97,7 +97,7 @@ impl TrackerRequest {
         });
 
         querystring.push_str("&peer_id=");
-        querystring.push_str(match URLEncoded::new().urlencode(&self.peer_id) {
+        querystring.push_str(match URLEncoded::encode(&self.peer_id) {
             Ok(it) => {
                 url = it.get_url();
                 &url

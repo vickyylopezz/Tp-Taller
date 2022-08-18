@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn response_with_few_keys() {
-        let response = "d8:intervali1800e5:peersld2:ip13:192.168.189.14:porti20111eeee".into();
+        let response = "d5:peersld2:ip13:192.168.189.14:porti20111eeee".into();
         let bencoded_dictionary = parser::parse(response).unwrap();
 
         assert_eq!(

@@ -8,6 +8,7 @@ use crate::log::logger;
 
 use log::{error, info};
 use native_tls::TlsConnector;
+use serde::__private::from_utf8_lossy;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
@@ -126,7 +127,7 @@ fn make_request(request: &mut TrackerRequest) -> Result<Stream, TrackerRequestEr
                 .map_err(|_| TrackerRequestError::InvalidQuerystring)?
                 .get_querystring()
         );
-        let header = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", path, host);
+        let header = format!("GET {} HTTP/1.1\r\nHost: {}\r\n\r\n", path, host);
         match stream.write_all(header.as_bytes()) {
             Ok(_) => Ok({
                 Stream {
@@ -136,10 +137,11 @@ fn make_request(request: &mut TrackerRequest) -> Result<Stream, TrackerRequestEr
             Err(_) => Err(TrackerRequestError::WriteStream),
         }
     } else {
-        let host = match parse_torrent_host(&mut announce) {
+        let _host = match parse_torrent_host(&mut announce) {
             Some(it) => it,
             None => return Err(TrackerRequestError::Host),
         };
+        let host = "127.0.0.1:7878";
         let mut stream = match TcpStream::connect(host) {
             Ok(it) => it,
             Err(_) => return Err(TrackerRequestError::InvalidTcpStream),
@@ -157,7 +159,8 @@ fn make_request(request: &mut TrackerRequest) -> Result<Stream, TrackerRequestEr
                 .map_err(|_| TrackerRequestError::InvalidQuerystring)?
                 .get_querystring()
         );
-        let header = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", path, host);
+        let header = format!("GET {} HTTP/1.1\r\nHost: {}\r\n\r\n", path, host);
+        println!("{}", header);
         match stream.write_all(header.as_bytes()) {
             Ok(_) => Ok({
                 Stream {
@@ -185,8 +188,8 @@ fn parse_response(
     response: Vec<u8>,
     peer_id: [u8; 20],
 ) -> Result<TrackerResponse, TrackerResponseError> {
-    let bencoded_dictionary = parser::parse(response).unwrap();
-
+    let bencoded_dictionary = parser::parse(response.clone()).unwrap();
+    println!("{:?}", from_utf8_lossy(&response));
     TrackerResponse::new(bencoded_dictionary, peer_id).map_err(|_| TrackerResponseError::Parse)
 }
 
